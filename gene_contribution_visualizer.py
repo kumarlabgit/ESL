@@ -120,7 +120,6 @@ def gcv_median(predictions_table, lead_cols=2, response_idx=2, prediction_idx=3,
 	num_rows, num_cols = data.shape
 	print("\nRows: {}\nCols: {}\n".format(num_rows, num_cols))
 	#data = np.random.rand(10, 10) * 2 - 1
-	print(lead_cols)
 
 
 	# Sort columns by sum of contributions

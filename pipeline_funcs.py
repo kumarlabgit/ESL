@@ -10,6 +10,7 @@ import xml.etree.ElementTree as ET
 import multiprocessing
 from Bio import Phylo
 from Bio import AlignIO
+from datetime import datetime
 
 
 def find_result_files(args, hypothesis_file_list):
@@ -89,9 +90,10 @@ def analyze_ensemble_weights(args, weights):
 	return score_tables
 
 
-def generate_gene_prediction_table(weights_filename, responses_filename, groups_filename, features_filename, output_filename, gene_list, missing_seqs, group_list, field_filename=None):
+def generate_gene_prediction_table(weights_filename, responses_filename, groups_filename, features_filename, output_filename, gene_list, missing_seqs, group_list, model, features, field_filename=None):
 	# Read weights, responses, and group indices files
-	model = xml_model_to_dict(weights_filename)
+	start = datetime.now()
+	#model = xml_model_to_dict(weights_filename)
 	weight_list = numpy.asarray(model["weight_list"])
 	seqlist = []
 	responses = {}
@@ -117,25 +119,22 @@ def generate_gene_prediction_table(weights_filename, responses_filename, groups_
 		group_weights.append(numpy.asarray([model["weight_list"][field[x]] for x in range(group[0]-1, group[1])]))
 	# Open features file and process 1 row at a time,
 	#  can be modified to process in chunks that fit in memory later.
-	group_sums = []
-	predictions = []
-	with open(features_filename, 'r') as file:
-		for line in file:
-			data = numpy.asarray([float(x) for x in line.strip().split(",")])
-			sums = []
-			for (index, weight) in zip(group_indices, group_weights):
-				#print(index)
-				#print(len(data[index[0]-1:index[1]]))
-				sums.append(sum(numpy.asarray([data[x] for x in field[index[0]-1:index[1]]]) * weight))
-			group_sums.append(sums)
-			predictions.append(sum((data * weight_list)) + model["intercept"])
-	# Write gene predictions table
+	# print("Time elapsed while setting up gene prediction inputs/groups: {}".format(datetime.now() - start))
+	start = datetime.now()
+	#features = numpy.loadtxt(features_filename, delimiter=',')
+	# for (index, weight) in zip(group_indices, group_weights):
+	# 	group_sums.append(numpy.sum(features[:, field[index[0] - 1:index[1]]] * weight, 1))
+	group_sums = numpy.stack([numpy.sum(features[:, field[index[0] - 1:index[1]]] * weight, 1) for (index, weight) in zip(group_indices, group_weights)]).transpose()
+	#predictions = numpy.sum(features * weight_list, 1) + model["intercept"]
+	predictions = numpy.sum(group_sums, 1) + model["intercept"]
+	# print("Time elapsed while multiplying features by group weights: {}".format(datetime.now() - start))
 	with open(output_filename, 'w') as file:
 		file.write("SeqID\tResponse\tPrediction\tIntercept\t{}\n".format("\t".join([",".join(x) for x in group_list])))
 		for (seqid, gene_sums, prediction) in zip(seqlist, group_sums, predictions):
 			for i in range(0, len(gene_sums)):
 				if sum([1 for x in group_list[i] if (seqid, x) in missing_seqs]) == len(group_list[i]):
-					gene_sums[i] = "N/A"
+					#gene_sums[i] = "N/A"
+					gene_sums[i] = numpy.nan
 			file.write("{}\t{}\t{}\t{}\t{}\n".format(seqid, responses[seqid], prediction, model["intercept"], "\t".join([str(x) for x in gene_sums])))
 	with open(str(output_filename).replace("_gene_predictions", "_GSS"), 'w') as file:
 		file.write("{}\t{}\n".format("Gene","GSS"))
@@ -524,34 +523,40 @@ def generate_input_matrices(alnlist_filename, hypothesis_filename_list, args):
 			# Construct preprocessing command
 			preprocess_cmd = "{} {} {} {} {}".format(preprocess_exe, os.path.join(os.getcwd(), filename), alnlist_filename, output_basename, options)
 			print(preprocess_cmd)
-			subprocess.call(preprocess_cmd.split(" "), stderr=subprocess.STDOUT, cwd=preprocess_cwd)
-			if preprocess_cwd != ".":
-				if os.path.exists(output_basename):
-					shutil.copytree(os.path.join(preprocess_cwd, output_basename), output_basename, dirs_exist_ok=True)
-					shutil.rmtree(os.path.join(preprocess_cwd, output_basename))
-				else:
-					shutil.move(os.path.join(preprocess_cwd, output_basename), output_basename)
 			hypothesis_basename = os.path.splitext(os.path.basename(filename))[0]
-			if True:
-				position_stats = {}
-				#stat_keys = ["mic", "entropy"]
-				stat_keys = ["mic"]
-				for aln_basename in aln_file_list.keys():
-					position_stats[aln_basename] = calculate_position_stats(os.path.join(preprocess_cwd, aln_file_list[aln_basename]), filename)
-				with open(os.path.join(output_basename, "pos_stats_" + hypothesis_basename + ".txt"), 'w') as file:
-					file.write("{}\t{}\n".format("Position Name", '\t'.join(stat_keys)))
-					for aln_basename in position_stats.keys():
-						for i in range(0, len(position_stats[aln_basename]["mic"])):
-							file.write("{}_{}\t{}\n".format(aln_basename, i, '\t'.join([str(position_stats[aln_basename][stat_key][i]) for stat_key in stat_keys])))
-			shutil.move(os.path.join(output_basename, "feature_" + output_basename + ".txt"), os.path.join(output_basename, "feature_" + hypothesis_basename + ".txt"))
-			shutil.move(os.path.join(output_basename, "group_indices_" + output_basename + ".txt"), os.path.join(output_basename, "group_indices_" + hypothesis_basename + ".txt"))
-			shutil.move(os.path.join(output_basename, "response_" + output_basename + ".txt"), os.path.join(output_basename, "response_" + hypothesis_basename + ".txt"))
-			shutil.move(os.path.join(output_basename, "field_" + output_basename + ".txt"), os.path.join(output_basename, "field_" + hypothesis_basename + ".txt"))
-			shutil.move(os.path.join(output_basename, "feature_mapping_" + output_basename + ".txt"), os.path.join(output_basename, "feature_mapping_" + hypothesis_basename + ".txt"))
-			try:
-				shutil.move(os.path.join(output_basename, "resampled_" + output_basename + ".txt"), os.path.join(output_basename, "resampled_" + hypothesis_basename + ".txt"))
-			except:
-				pass
+			if args.skip_preprocessing:
+				if os.path.exists(os.path.join(output_basename, "feature_" + hypothesis_basename + ".txt")):
+					print("Features file detected, skipping preprocessing step...")
+				else:
+					raise Exception("Preprocessing skipped, but no features file detected at {}.".format(os.path.join(output_basename, "feature_" + hypothesis_basename + ".txt")))
+			else:
+				subprocess.call(preprocess_cmd.split(" "), stderr=subprocess.STDOUT, cwd=preprocess_cwd)
+				if preprocess_cwd != ".":
+					if os.path.exists(output_basename):
+						shutil.copytree(os.path.join(preprocess_cwd, output_basename), output_basename, dirs_exist_ok=True)
+						shutil.rmtree(os.path.join(preprocess_cwd, output_basename))
+					else:
+						shutil.move(os.path.join(preprocess_cwd, output_basename), output_basename)
+				if True:
+					position_stats = {}
+					#stat_keys = ["mic", "entropy"]
+					stat_keys = ["mic"]
+					for aln_basename in aln_file_list.keys():
+						position_stats[aln_basename] = calculate_position_stats(os.path.join(preprocess_cwd, aln_file_list[aln_basename]), filename)
+					with open(os.path.join(output_basename, "pos_stats_" + hypothesis_basename + ".txt"), 'w') as file:
+						file.write("{}\t{}\n".format("Position Name", '\t'.join(stat_keys)))
+						for aln_basename in position_stats.keys():
+							for i in range(0, len(position_stats[aln_basename]["mic"])):
+								file.write("{}_{}\t{}\n".format(aln_basename, i, '\t'.join([str(position_stats[aln_basename][stat_key][i]) for stat_key in stat_keys])))
+				shutil.move(os.path.join(output_basename, "feature_" + output_basename + ".txt"), os.path.join(output_basename, "feature_" + hypothesis_basename + ".txt"))
+				shutil.move(os.path.join(output_basename, "group_indices_" + output_basename + ".txt"), os.path.join(output_basename, "group_indices_" + hypothesis_basename + ".txt"))
+				shutil.move(os.path.join(output_basename, "response_" + output_basename + ".txt"), os.path.join(output_basename, "response_" + hypothesis_basename + ".txt"))
+				shutil.move(os.path.join(output_basename, "field_" + output_basename + ".txt"), os.path.join(output_basename, "field_" + hypothesis_basename + ".txt"))
+				shutil.move(os.path.join(output_basename, "feature_mapping_" + output_basename + ".txt"), os.path.join(output_basename, "feature_mapping_" + hypothesis_basename + ".txt"))
+				try:
+					shutil.move(os.path.join(output_basename, "resampled_" + output_basename + ".txt"), os.path.join(output_basename, "resampled_" + hypothesis_basename + ".txt"))
+				except:
+					pass
 			response_file_list.append(os.path.join(output_basename, "response_" + hypothesis_basename + ".txt"))
 			group_indices_file_list.append(os.path.join(output_basename, "group_indices_" + hypothesis_basename + ".txt"))
 			field_file_list.append(os.path.join(output_basename, "field_" + hypothesis_basename + ".txt"))
@@ -629,13 +634,13 @@ def run_esl(features_filename_list, groups_filename_list, response_filename_list
 		if method == "overlapping_sg_lasso_leastr":
 			esl_cmd = esl_cmd + " -g {}".format(field_filename)
 		print(esl_cmd)
-		subprocess.call("touch {}".format(basename + "_out_feature_weights.xml"), stderr=subprocess.STDOUT, shell=True)
+#		subprocess.call("touch {}".format(basename + "_out_feature_weights.xml"), stderr=subprocess.STDOUT, shell=True)
 		subprocess.call(esl_cmd.split(" "), stderr=subprocess.STDOUT)
 		weights_file_list.append(basename + "_out_feature_weights.xml")
 	return weights_file_list
 
 
-def run_esl_grid(features_filename_list, groups_filename_list, response_filename_list, field_filename_list, sparsity, group_sparsity, method, slep_opts_filename_list, lambda_list_filename, z_ind = None, y_ind = None):
+def run_esl_grid(features_filename_list, groups_filename_list, response_filename_list, field_filename_list, sparsity, group_sparsity, method, slep_opts_filename_list, lambda_list_filename, args, z_ind = None, y_ind = None):
 	if method == "leastr":
 		method = "sg_lasso_leastr"
 	elif method == "logistic":
@@ -652,7 +657,7 @@ def run_esl_grid(features_filename_list, groups_filename_list, response_filename
 	with open(lambda_list_filename, 'r') as file:
 		for line in file:
 			data = line.strip().split("\t")
-			lambda_list.append((str(data[0]).replace("0.", ""), str(data[1]).replace("0.", "")))
+			lambda_list.append((data[0], data[1]))
 	# Run sg_lasso for each response file in response_filename_list
 	for response_filename, features_filename, groups_filename, field_filename, slep_opts_filename in zip(response_filename_list, features_filename_list, groups_filename_list, field_filename_list, slep_opts_filename_list):
 		if z_ind is None or y_ind is None:
@@ -668,41 +673,59 @@ def run_esl_grid(features_filename_list, groups_filename_list, response_filename
 		esl_cmd = esl_cmd + " -l {}".format(lambda_list_filename)
 		print(esl_cmd)
 		#subprocess.call("touch {}".format(basename + "_out_feature_weights.xml"), stderr=subprocess.STDOUT, shell=True)
-		subprocess.call(esl_cmd.split(" "), stderr=subprocess.STDOUT)
+		if args.skip_processing:
+			for xml_file in ["{}_out_feature_weights_{}_{}.xml".format(basename, lambda_val2label(val[0]), lambda_val2label(val[1])) for val in lambda_list]:
+				if not os.path.exists(xml_file):
+					raise Exception("Processing skipped, but no xml results file detected at {}.".format(xml_file))
+			print("All expected XML result files detected, skipping processing step...")
+		else:
+			subprocess.call(esl_cmd.split(" "), stderr=subprocess.STDOUT)
 		weights_file_list.append(["{}_out_feature_weights_{}_{}.xml".format(basename, lambda_val2label(val[0]), lambda_val2label(val[1])) for val in lambda_list])
 	return weights_file_list
 
 
 def lambda_val2label(lambda_val):
-	lambda_str = str(lambda_val)
-	if lambda_str[-4:] == "0001" and float(lambda_val) > 0.0001:
-		lambda_str = lambda_str[0:-4]
-	if lambda_str[0:2] == "0.":
-		lambda_str = lambda_str[2:]
-	return lambda_str.rstrip('0')
+	lambda_val = float(lambda_val)
+	if "{:g}".format(lambda_val)[0:2] == "0.":
+		return "{:g}".format(lambda_val)[2:]
+	else:
+		return "{:g}".format(lambda_val)
 
 
-def process_grid_weights(weights_file_list, hypothesis_file_list, groups_filename_list, features_filename_list, gene_list, HSS, missing_seqs, group_list):
-	thread_pool = multiprocessing.Pool(multiprocessing.cpu_count() - 1)
-	pool_results = {hypothesis_filename: [] for hypothesis_filename in hypothesis_file_list}
+def process_grid_weights(weights_file_list, hypothesis_file_list, groups_filename_list, features_filename_list, gene_list, HSS, missing_seqs, group_list, args):
+	# grid_threads = args.grid_threads
+	# if grid_threads is None:
+	# 	grid_threads = multiprocessing.cpu_count() - 1
+	# thread_pool = multiprocessing.Pool(grid_threads)
+	# pool_results = {hypothesis_filename: [] for hypothesis_filename in hypothesis_file_list}
 	for (weights_filename_list, hypothesis_filename, groups_filename, features_filename) in zip(weights_file_list, hypothesis_file_list, groups_filename_list, features_filename_list):
 		# outname = hypothesis_filename.replace("_hypothesis.txt", "_gene_predictions.txt")
+		start = datetime.now()
+		features = numpy.loadtxt(features_filename, delimiter=',')
+		print("Time elapsed loading features file: {}".format(datetime.now() - start))
 		for weights_filename in weights_filename_list:
 			outname = weights_filename.replace("_hypothesis", "").replace("_out_feature_weights", "_gene_predictions").replace(".xml", ".txt")
 			# generate_gene_prediction_table(weights_filename, hypothesis_filename, groups_filename, features_filename, outname, gene_list, missing_seqs, group_list, groups_filename.replace("group_indices_", "field_"))
 			# total_significance = generate_mapped_weights_file(weights_filename, groups_filename.replace("group_indices_", "feature_mapping_"))
-			# HSS[hypothesis_filename] = HSS.get(hypothesis_filename, 0) + total_significance
-			pool_results[hypothesis_filename].append(thread_pool.apply_async(process_single_grid_weight, args=(weights_filename, hypothesis_filename, groups_filename, features_filename, outname, gene_list, missing_seqs, group_list, HSS)))
-	thread_pool.close()
-	thread_pool.join()
-	for hypothesis_filename in hypothesis_file_list:
-		for pool_result in pool_results[hypothesis_filename]:
-			HSS[hypothesis_filename] = HSS.get(hypothesis_filename, 0) + pool_result.get()
+			HSS[hypothesis_filename] = HSS.get(hypothesis_filename, 0) + process_single_grid_weight(weights_filename, hypothesis_filename, groups_filename, features_filename, outname, gene_list, missing_seqs, group_list, features, args)
+#			pool_results[hypothesis_filename].append(thread_pool.apply_async(process_single_grid_weight, args=(weights_filename, hypothesis_filename, groups_filename, features_filename, outname, gene_list, missing_seqs, group_list, args)))
+	# thread_pool.close()
+	# thread_pool.join()
+	# for hypothesis_filename in hypothesis_file_list:
+	# 	for pool_result in pool_results[hypothesis_filename]:
+	# 		HSS[hypothesis_filename] = HSS.get(hypothesis_filename, 0) + pool_result.get()
 
 
-def process_single_grid_weight(weights_filename, hypothesis_filename, groups_filename, features_filename, outname, gene_list, missing_seqs, group_list, HSS):
-	generate_gene_prediction_table(weights_filename, hypothesis_filename, groups_filename, features_filename, outname, gene_list, missing_seqs, group_list, groups_filename.replace("group_indices_", "field_"))
-	total_significance = generate_mapped_weights_file(weights_filename, groups_filename.replace("group_indices_", "feature_mapping_"))
+def process_single_grid_weight(weights_filename, hypothesis_filename, groups_filename, features_filename, outname, gene_list, missing_seqs, group_list, features, args):
+	start = datetime.now()
+	model = xml_model_to_dict(weights_filename)
+	generate_gene_prediction_table(weights_filename, hypothesis_filename, groups_filename, features_filename, outname, gene_list, missing_seqs, group_list, model, features, groups_filename.replace("group_indices_", "field_"))
+	print("Time elapsed while generating gene prediction table: {}".format(datetime.now() - start))
+	start = datetime.now()
+	total_significance = generate_mapped_weights_file(weights_filename, groups_filename.replace("group_indices_", "feature_mapping_"), model)
+	print("Time elapsed while generating mapped weights file: {}".format(datetime.now() - start))
+	if not args.preserve_xml:
+		os.remove(weights_filename)
 	return total_significance
 
 
@@ -710,16 +733,19 @@ def process_weights(weights_file_list, hypothesis_file_list, groups_filename_lis
 	for (weights_filename, hypothesis_filename, groups_filename, features_filename) in zip(weights_file_list, hypothesis_file_list, groups_filename_list, features_filename_list):
 		# outname = hypothesis_filename.replace("_hypothesis.txt", "_gene_predictions.txt")
 		outname = weights_filename.replace("_hypothesis", "").replace("_out_feature_weights.xml", "_gene_predictions.txt")
-		generate_gene_prediction_table(weights_filename, hypothesis_filename, groups_filename, features_filename, outname, gene_list, missing_seqs, group_list, groups_filename.replace("group_indices_", "field_"))
-		total_significance = generate_mapped_weights_file(weights_filename, groups_filename.replace("group_indices_", "feature_mapping_"))
+		model = xml_model_to_dict(weights_filename)
+		generate_gene_prediction_table(weights_filename, hypothesis_filename, groups_filename, features_filename, outname, gene_list, missing_seqs, group_list, model, groups_filename.replace("group_indices_", "field_"))
+		total_significance = generate_mapped_weights_file(weights_filename, groups_filename.replace("group_indices_", "feature_mapping_"), model)
+		os.remove(weights_filename)
 		HSS[hypothesis_filename] = HSS.get(hypothesis_filename, 0) + total_significance
 
-def generate_mapped_weights_file(weights_filename, feature_map_filename):
+
+def generate_mapped_weights_file(weights_filename, feature_map_filename, model):
 	# Read weights and feature mapping files
 	PSS = {}
 	posname_list = []
 	last_posname = ""
-	model = xml_model_to_dict(weights_filename)
+	#model = xml_model_to_dict(weights_filename)
 	feature_map = {}
 	pos_stats = {}
 	# output_filename = str(weights_filename).replace("_hypothesis_out_feature_weights.xml", "_mapped_feature_weights.txt")
@@ -753,7 +779,6 @@ def generate_mapped_weights_file(weights_filename, feature_map_filename):
 			file.write("{}\t{}\n".format("Position Name", "PSS"))
 			for posname in posname_list:
 				file.write("{}\t{}\n".format(posname, PSS[posname]))
-	os.remove(weights_filename)
 	# Return sum of all position significance scores
 	return sum(PSS.values())
 

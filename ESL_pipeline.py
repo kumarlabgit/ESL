@@ -11,7 +11,9 @@ import pandas
 import gene_contribution_visualizer as gcv
 from multiprocessing import Process
 from multiprocessing import Pool
+from datetime import datetime
 
+timers = {}
 
 def grid_search(args, original_output, input_files):
 	hypothesis_file_list = input_files["hypothesis_file_list"]
@@ -31,8 +33,14 @@ def grid_search(args, original_output, input_files):
 		for ms_line in file:
 			ms_data = ms_line.strip().split("\t")
 			missing_seqs.add((ms_data[1], os.path.splitext(os.path.basename(ms_data[0]))[0]))
-	weights_file_list = pf.run_esl_grid(features_filename_list, groups_filename_list, response_filename_list, field_filename_list, args.lambda1, args.lambda2, args.method, slep_opts_file_list, lambda_list_filename)
-	pf.process_grid_weights(weights_file_list, hypothesis_file_list, groups_filename_list, features_filename_list, gene_list, HSS, missing_seqs, group_list)
+	start = datetime.now()
+	weights_file_list = pf.run_esl_grid(features_filename_list, groups_filename_list, response_filename_list, field_filename_list, args.lambda1, args.lambda2, args.method, slep_opts_file_list, lambda_list_filename, args)
+	timers["LASSO"] = datetime.now() - start
+	print("Time elapsed while performing LASSO operations: {}".format(timers["LASSO"]))
+	start = datetime.now()
+	pf.process_grid_weights(weights_file_list, hypothesis_file_list, groups_filename_list, features_filename_list, gene_list, HSS, missing_seqs, group_list, args)
+	timers["post_processing"] = datetime.now() - start
+	print("Total time elapsed while processing LASSO results: {}".format(timers["post_processing"]))
 	#os.mkdir(args.output)
 	lambda_list = []
 	with open(lambda_list_filename, 'r') as file:
@@ -42,10 +50,17 @@ def grid_search(args, original_output, input_files):
 	for hypothesis_filename in hypothesis_file_list:
 		for lambda_pair1 in lambda_list:
 			# shutil.move(hypothesis_filename, args.output)
-			try:
-				shutil.move(hypothesis_filename.replace(".txt","_out_feature_weights_{}_{}.xml".format(lambda_pair1[0], lambda_pair1[1])), args.output)
-			except:
-				pass
+			if args.skip_preprocessing:
+				for string in ["gene_predictions_{}_{}.txt","mapped_feature_weights_{}_{}.txt","PSS_{}_{}.txt","GSS_{}_{}.txt"]:
+					if os.path.exists(os.path.join(args.output, hypothesis_filename.replace("hypothesis.txt", string.format(lambda_pair1[0], lambda_pair1[1])))):
+						os.remove(os.path.join(args.output, hypothesis_filename.replace("hypothesis.txt", string.format(lambda_pair1[0], lambda_pair1[1]))))
+				if os.path.exists(hypothesis_filename.replace(".txt","_out_feature_weights_{}_{}.xml".format(lambda_pair1[0], lambda_pair1[1]))) and not args.skip_processing:
+					os.remove(hypothesis_filename.replace(".txt","_out_feature_weights_{}_{}.xml".format(lambda_pair1[0], lambda_pair1[1])))
+			if not args.preserve_xml:
+				try:
+					shutil.move(hypothesis_filename.replace(".txt","_out_feature_weights_{}_{}.xml".format(lambda_pair1[0], lambda_pair1[1])), args.output)
+				except:
+					pass
 			shutil.move(hypothesis_filename.replace("hypothesis.txt", "gene_predictions_{}_{}.txt".format(lambda_pair1[0], lambda_pair1[1])), args.output)
 			shutil.move(hypothesis_filename.replace("hypothesis.txt", "mapped_feature_weights_{}_{}.txt".format(lambda_pair1[0], lambda_pair1[1])), args.output)
 			shutil.move(hypothesis_filename.replace("hypothesis.txt", "PSS_{}_{}.txt".format(lambda_pair1[0], lambda_pair1[1])), args.output)
@@ -202,13 +217,16 @@ if __name__ == '__main__':
 	parser.add_argument("--slep_sample_balance", help="Automatically uses the SLEP option to balance sample weights, only available for non-overlapping, logistic sglasso.",
 						action='store_true', default=False)
 	parser.add_argument("--response", help="File containing list of named node/response value pairs.", type=str, default=None)
+	parser.add_argument("--skip_preprocessing", help="Assume preprocessing files have already been generated.", action='store_true', default=False)
+	parser.add_argument("--skip_processing", help="Assume results XML files have already been generated.", action='store_true', default=False)
+	parser.add_argument("--preserve_xml", help="Leave results XML files in place for reprocessing.", action='store_true', default=False)
 	parser.add_argument("-z", "--lambda1", help="Feature sparsity parameter.", type=float, default=0.1)
 	parser.add_argument("-y", "--lambda2", help="Group sparsity parameter.", type=float, default=0.1)
 	parser.add_argument("--grid_z", help="Grid search sparsity parameter interval specified as 'min,max,step_size'", type=str, default=None)
 	parser.add_argument("--grid_y", help="Grid search group sparsity parameter interval specified as 'min,max,step_size'", type=str, default=None)
 	parser.add_argument("--grid_rmse_cutoff", help="RMSE cutoff when selecting models to aggregate.", type=float, default=100.0)
 	parser.add_argument("--grid_acc_cutoff", help="Accuracy cutoff when selecting models to aggregate.", type=float, default=0.0)
-	parser.add_argument("--grid_threads", help="Number of threads to use when running grid search.", type=int, default=None)
+	parser.add_argument("--grid_threads", help="Number of threads to use when aggregating grid search results.", type=int, default=None)
 	parser.add_argument("--grid_summary_only", help="Skip generating graphics for individual runs/models.", action='store_true', default=False)
 	parser.add_argument("--no_group_penalty", help="Perform mono-level optimization, ignoring group level sparsity penalties.",
 						action='store_true', default=False)
@@ -245,12 +263,15 @@ if __name__ == '__main__':
 		y_steps = (y_max - y_min) / y_interval
 		y_list = [y_min + (x * y_interval) for x in range(0, int(y_steps) + 1)]
 		[z_count, y_count] = [0, 0]
+		start = datetime.now()
 		input_files = {}
 		input_files["hypothesis_file_list"], input_files["slep_opts_file_list"] = pf.generate_hypothesis_set(args)
 		input_files["features_filename_list"], input_files["groups_filename_list"], input_files["response_filename_list"], input_files["gene_list"], \
 		input_files["field_filename_list"], input_files["group_list"] = pf.generate_input_matrices(args.aln_list, input_files["hypothesis_file_list"], args)
 		input_files["lambda_list"] = os.path.join(args.output, "{}_lambda_list.txt".format(args.output))
 		lambda_list = []
+		timers["pre_processing"] = datetime.now() - start
+		print("Time elapsed while processing alignments to features: {}".format(timers["pre_processing"]))
 		with open(os.path.join(args.output, "{}_lambda_list.txt".format(args.output)), 'w') as file:
 			for lambda1 in z_list:
 				for lambda2 in y_list:
@@ -307,7 +328,7 @@ if __name__ == '__main__':
 					file.write("{}\t{}\n".format(pos, statistics.median([float(x) for x in pss_vals[pos].values() if x != 0])))
 			# Write aggregated gene_predictions file
 			with open(os.path.join(args_original.output, "{}_GCS_median.txt".format(hypothesis)), 'w') as file:
-				file.write("SeqID\tResponse\tPrediction_mode\t{}\n".format("\t".join([gene for gene in gene_predictions[0].columns if gene not in ["SeqID", "Prediction", "Intercept", "Response"]])))
+				file.write("SeqID\tResponse\tPrediction_mean\t{}\n".format("\t".join([gene for gene in gene_predictions[0].columns if gene not in ["SeqID", "Prediction", "Intercept", "Response"]])))
 				for species in gene_predictions[0].index:
 					file.write("{}\t".format(species))
 					for gene in gene_predictions[0].columns:
@@ -327,6 +348,8 @@ if __name__ == '__main__':
 					file.write("\n")
 			gcv.gcv_median(os.path.join(args_original.output, "{}_GCS_median.txt".format(hypothesis)), lead_cols=3, gene_limit=args.gene_display_limit, ssq_threshold=args.gene_display_cutoff)
 		for file in input_files["hypothesis_file_list"]:
+			if args.skip_preprocessing and os.path.exists(os.path.join(args_original.output, file)):
+				os.remove(os.path.join(args_original.output, file))
 			shutil.move(file, args_original.output)
 	else:
 		score_tables = main(args)
@@ -423,5 +446,6 @@ if __name__ == '__main__':
 	# 	features_filename, groups_filename, response_filename_list = pf.generate_input_matrices("sample_files/angiosperm_100_sample_alns.txt", hypothesis_file_list)
 	# 	weights_file_list = pf.run_esl(features_filename, groups_filename, response_filename_list)
 	# 	pf.process_weights(weights_file_list, hypothesis_file_list, groups_filename, features_filename)
-
+	for key in timers.keys():
+		print("Total time elapsed for {}: {}".format(key, timers[key]))
 
