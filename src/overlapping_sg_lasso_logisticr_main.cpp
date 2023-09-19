@@ -52,6 +52,11 @@ int main(int argc, char *argv[]) {
     .help("Specify group feature sparsity.")
     .scan<'g', double>();
 
+  program.add_argument("-c", "--gene_count_threshold")
+    .default_value(0)
+    .help("Specify gene selection cutoff for grid-based model building.")
+    .scan<'i', int>();
+
   try {
     program.parse_args(argc, argv);
   }
@@ -70,6 +75,8 @@ int main(int argc, char *argv[]) {
 
   OLSGLassoLogisticR* sgl;
 
+  int auto_cancel_threshold = program.get<int>("gene_count_threshold");
+
   features.load(csv_name(program.get<std::string>("features"),csv_opts::trans));
   responses.load(csv_name(program.get<std::string>("response"),csv_opts::trans));
 
@@ -85,10 +92,11 @@ int main(int argc, char *argv[]) {
 
   if (program.get<std::string>("lambda_list") != "-") {
     std::vector<std::tuple<double, double>> lambda_list = readLambdaList(program.get<std::string>("lambda_list"));
-
+    double max_glambda2 = 1.0;
     for (const auto& item : lambda_list) {
 	  double glambda[2] = {std::get<0>(item), std::get<1>(item)};
 	  std::cout << glambda[0] << " - " << glambda[1] << std::endl;
+	  if (glambda[1]>max_glambda2) { std::cout << "Skipping this lambda value due to gene count thresholding..." << std::endl; continue; }
 	  sgl = new OLSGLassoLogisticR(features, responses, opts_ind, field, glambda, processSlepOpts(program.get<std::string>("slep")));
 
       //TODO: make out filename reflect lambda pair
@@ -99,6 +107,11 @@ int main(int argc, char *argv[]) {
         fileStream.close();
       } else {
         std::cout << "Could not open output file for writing." << std::endl;
+      }
+
+      std::cout << "Non-zero gene count: " << sgl->NonZeroGeneCount() << std::endl;
+      if (sgl->NonZeroGeneCount()<=auto_cancel_threshold){
+        max_glambda2 = glambda[1];
       }
     }
 

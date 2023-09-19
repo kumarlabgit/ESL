@@ -549,6 +549,9 @@ opts_ind = opts_ind.t();
   parameters = x_row.t();
 
   free(gap);
+
+  this->nz_gene_count = countNonZeroGenes(parameters, weights);
+
   return x_row;
 }
 
@@ -853,4 +856,23 @@ const double OLSGLassoLeastR::computeLambda2Max(const arma::rowvec& x_in,
 
 
 
+int countNonZeroGenes(const arma::vec& arr, const arma::mat& ranges) {
+    auto detectNonZeroInRange = [&arr](int start, int end) -> int {
+        for (int i = start; i <= end; ++i) {
+            if (arr(i) != 0) {
+                return 1;
+            }
+        }
+        return 0;
+    };
+    int count = 0;
 
+    for (arma::uword i = 0; i < ranges.n_rows; ++i) {
+        int start = static_cast<int>(ranges(i, 0))-1;
+        int end = static_cast<int>(ranges(i, 1))-1;
+        count = count + detectNonZeroInRange(start, end);
+    }
+
+    //std::cout << "Number of non-zero genes: " << count << std::endl;
+    return count;
+}

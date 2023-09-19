@@ -57,6 +57,8 @@ class OLSGLassoLogisticR
   //! Return whether or not an intercept term is used in the model.
   bool Intercept() const { return intercept; }
 
+  int NonZeroGeneCount() { return nz_gene_count; }
+
   /**
    * Serialize the model.
    */
@@ -73,6 +75,8 @@ class OLSGLassoLogisticR
 
 
  private:
+  //Non-zero gene count
+  int nz_gene_count = 0;
   /**
    * The calculated B.
    * Initialized and filled by constructor to hold the least squares solution.
@@ -92,3 +96,4 @@ class OLSGLassoLogisticR
 };
 
 
+int countNonZeroGenes(const arma::vec& arr, const arma::mat& ranges);
