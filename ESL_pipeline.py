@@ -38,23 +38,27 @@ def grid_search(args, original_output, input_files):
 	timers["LASSO"] = datetime.now() - start
 	print("Time elapsed while performing LASSO operations: {}".format(timers["LASSO"]))
 	start = datetime.now()
-	pf.process_grid_weights(weights_file_list, hypothesis_file_list, groups_filename_list, features_filename_list, gene_list, HSS, missing_seqs, group_list, args)
+	missing_results = pf.process_grid_weights(weights_file_list, hypothesis_file_list, groups_filename_list, features_filename_list, gene_list, HSS, missing_seqs, group_list, args)
 	timers["post_processing"] = datetime.now() - start
 	print("Total time elapsed while processing LASSO results: {}".format(timers["post_processing"]))
 	#os.mkdir(args.output)
 	lambda_list = []
+	missing_predictions = []
 	with open(lambda_list_filename, 'r') as file:
 		for lambda_line in file:
 			lambda_pair1 = lambda_line.strip().split("\t")
 			lambda_list.append((str(lambda_pair1[0]).replace("0.", ""), str(lambda_pair1[1]).replace("0.", "")))
 	for hypothesis_filename in hypothesis_file_list:
 		for lambda_pair1 in lambda_list:
+			if hypothesis_filename.replace(".txt","_out_feature_weights_{}_{}.xml".format(lambda_pair1[0], lambda_pair1[1])) in missing_results:
+				missing_predictions.append(hypothesis_filename.replace("hypothesis.txt", "gene_predictions_{}_{}.txt".format(lambda_pair1[0], lambda_pair1[1])))
+				continue
 			# shutil.move(hypothesis_filename, args.output)
 			if args.skip_preprocessing:
 				for string in ["gene_predictions_{}_{}.txt","mapped_feature_weights_{}_{}.txt","PSS_{}_{}.txt","GSS_{}_{}.txt"]:
 					if os.path.exists(os.path.join(args.output, hypothesis_filename.replace("hypothesis.txt", string.format(lambda_pair1[0], lambda_pair1[1])))):
 						os.remove(os.path.join(args.output, hypothesis_filename.replace("hypothesis.txt", string.format(lambda_pair1[0], lambda_pair1[1]))))
-				if os.path.exists(hypothesis_filename.replace(".txt","_out_feature_weights_{}_{}.xml".format(lambda_pair1[0], lambda_pair1[1]))) and not args.skip_processing:
+				if os.path.exists(hypothesis_filename.replace(".txt","_out_feature_weights_{}_{}.xml".format(lambda_pair1[0], lambda_pair1[1]))) and not args.skip_processing and not args.preserve_xml:
 					os.remove(hypothesis_filename.replace(".txt","_out_feature_weights_{}_{}.xml".format(lambda_pair1[0], lambda_pair1[1])))
 			if not args.preserve_xml:
 				try:
@@ -80,7 +84,7 @@ def grid_search(args, original_output, input_files):
 	for file in gcv_files:
 		if os.path.dirname(file)!=os.path.normpath(args.output):
 			shutil.move(file, args.output)
-	return hypothesis_file_list
+	return hypothesis_file_list, missing_predictions
 
 
 def main(args):
@@ -179,17 +183,6 @@ def main(args):
 		return hypothesis_file_list
 
 
-def threaded_main(args, original_output):
-	main(args)
-	shutil.move(args.output, original_output)
-
-
-def threaded_grid_search(args, original_output, input_files):
-	grid_search(args, original_output, input_files)
-	sys.stdout.flush()
-	shutil.move(args.output, original_output)
-
-
 def lambda_val2label(lambda_val):
 	# lambda_str = "{:g}".format(lambda_val)
 	# if lambda_str[-4:] == "0001" and lambda_val > 0.0001:
@@ -228,6 +221,7 @@ if __name__ == '__main__':
 	parser.add_argument("--grid_acc_cutoff", help="Accuracy cutoff when selecting models to aggregate.", type=float, default=0.0)
 	parser.add_argument("--grid_threads", help="Number of threads to use when aggregating grid search results.", type=int, default=None)
 	parser.add_argument("--grid_summary_only", help="Skip generating graphics for individual runs/models.", action='store_true', default=False)
+	parser.add_argument("--grid_gene_threshold", help="Stop increasing L2 when model selects this many genes or fewer.", type=int, default=None)
 	parser.add_argument("--no_group_penalty", help="Perform mono-level optimization, ignoring group level sparsity penalties.",
 						action='store_true', default=False)
 	parser.add_argument("-o", "--output", help="Output directory.", type=str, default="output")
@@ -278,14 +272,18 @@ if __name__ == '__main__':
 					lambda_list.append((lambda1, lambda2))
 					file.write("{:g}\t{:g}\n".format(lambda1, lambda2))
 		# os.mkdir(args_original.output)
-		grid_search(args, args.output, input_files)
+		hypothesis_file_list, missing_predictions = grid_search(args, args.output, input_files)
 		pss_vals = {}
 		gss_vals = {}
 		# gene_predictions = []
 		hypothesis_list = list(set(["_".join(x.replace("_" + args_original.output, "").split("_")[0:-1]) for x in input_files["hypothesis_file_list"]]))
+		# print(missing_predictions)
 		for hypothesis in hypothesis_list:
 			gene_predictions = []
 			for lambda_pair in lambda_list:
+				# print("{}_{}_gene_predictions_{}_{}.txt".format(hypothesis, args_original.output, lambda_val2label(lambda_pair[0]), lambda_val2label(lambda_pair[1])))
+				if "{}_{}_gene_predictions_{}_{}.txt".format(hypothesis, args_original.output, lambda_val2label(lambda_pair[0]), lambda_val2label(lambda_pair[1])) in missing_predictions:
+					continue
 				# Parse gene_predictions files
 				rmse = 0
 				acc = 1

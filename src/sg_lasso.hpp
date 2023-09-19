@@ -86,6 +86,7 @@ class SGLasso
 
   void writeModelToXMLStream(std::ofstream& XMLFile);
 
+
   /**
    * Calculate y_i for each data point in points.
    *
@@ -144,6 +145,8 @@ class SGLasso
   //! Return whether or not an intercept term is used in the model.
   bool Intercept() const { return intercept; }
 
+  int NonZeroGeneCount() { return nz_gene_count; }
+
   /**
    * Serialize the model.
    */
@@ -160,6 +163,8 @@ class SGLasso
 
 
  private:
+  //Non-zero gene count
+  int nz_gene_count = 0;
   /**
    * The calculated B.
    * Initialized and filled by constructor to hold the least squares solution.
@@ -182,3 +187,5 @@ class SGLasso
 //} // namespace mlpack
 
 //#endif // MLPACK_METHODS_SG_LASSO_HPP
+
+int countNonZeroGenes(const arma::vec& arr, const arma::mat& ranges);

@@ -671,6 +671,8 @@ def run_esl_grid(features_filename_list, groups_filename_list, response_filename
 		if method == "overlapping_sg_lasso_leastr":
 			esl_cmd = esl_cmd + " -g {}".format(field_filename)
 		esl_cmd = esl_cmd + " -l {}".format(lambda_list_filename)
+		if args.grid_gene_threshold:
+			esl_cmd = esl_cmd + " -c {}".format(args.grid_gene_threshold)
 		print(esl_cmd)
 		#subprocess.call("touch {}".format(basename + "_out_feature_weights.xml"), stderr=subprocess.STDOUT, shell=True)
 		if args.skip_processing:
@@ -698,6 +700,7 @@ def process_grid_weights(weights_file_list, hypothesis_file_list, groups_filenam
 	# 	grid_threads = multiprocessing.cpu_count() - 1
 	# thread_pool = multiprocessing.Pool(grid_threads)
 	# pool_results = {hypothesis_filename: [] for hypothesis_filename in hypothesis_file_list}
+	missing_results = []
 	for (weights_filename_list, hypothesis_filename, groups_filename, features_filename) in zip(weights_file_list, hypothesis_file_list, groups_filename_list, features_filename_list):
 		# outname = hypothesis_filename.replace("_hypothesis.txt", "_gene_predictions.txt")
 		start = datetime.now()
@@ -707,13 +710,20 @@ def process_grid_weights(weights_file_list, hypothesis_file_list, groups_filenam
 			outname = weights_filename.replace("_hypothesis", "").replace("_out_feature_weights", "_gene_predictions").replace(".xml", ".txt")
 			# generate_gene_prediction_table(weights_filename, hypothesis_filename, groups_filename, features_filename, outname, gene_list, missing_seqs, group_list, groups_filename.replace("group_indices_", "field_"))
 			# total_significance = generate_mapped_weights_file(weights_filename, groups_filename.replace("group_indices_", "feature_mapping_"))
-			HSS[hypothesis_filename] = HSS.get(hypothesis_filename, 0) + process_single_grid_weight(weights_filename, hypothesis_filename, groups_filename, features_filename, outname, gene_list, missing_seqs, group_list, features, args)
-#			pool_results[hypothesis_filename].append(thread_pool.apply_async(process_single_grid_weight, args=(weights_filename, hypothesis_filename, groups_filename, features_filename, outname, gene_list, missing_seqs, group_list, args)))
+			if os.path.exists(weights_filename):
+				HSS[hypothesis_filename] = HSS.get(hypothesis_filename, 0) + process_single_grid_weight(weights_filename, hypothesis_filename, groups_filename, features_filename, outname, gene_list, missing_seqs, group_list, features, args)
+			elif args.grid_gene_threshold is not None:
+				print("No results file detected, most likely due to grid_gene_threshold: {}".format(weights_filename))
+				missing_results.append(weights_filename)
+			else:
+				raise Exception("Missing results file: {}".format(weights_filename))
+	#	pool_results[hypothesis_filename].append(thread_pool.apply_async(process_single_grid_weight, args=(weights_filename, hypothesis_filename, groups_filename, features_filename, outname, gene_list, missing_seqs, group_list, args)))
 	# thread_pool.close()
 	# thread_pool.join()
 	# for hypothesis_filename in hypothesis_file_list:
 	# 	for pool_result in pool_results[hypothesis_filename]:
 	# 		HSS[hypothesis_filename] = HSS.get(hypothesis_filename, 0) + pool_result.get()
+	return missing_results
 
 
 def process_single_grid_weight(weights_filename, hypothesis_filename, groups_filename, features_filename, outname, gene_list, missing_seqs, group_list, features, args):
