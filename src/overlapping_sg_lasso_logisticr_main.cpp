@@ -93,10 +93,17 @@ int main(int argc, char *argv[]) {
   if (program.get<std::string>("lambda_list") != "-") {
     std::vector<std::tuple<double, double>> lambda_list = readLambdaList(program.get<std::string>("lambda_list"));
     double max_glambda2 = 1.0;
+    double min_glambda2 = 1.0;
     for (const auto& item : lambda_list) {
 	  double glambda[2] = {std::get<0>(item), std::get<1>(item)};
+	  if (min_glambda2 > glambda[1]) {
+        min_glambda2 = glambda[1];
+      }
 	  std::cout << glambda[0] << " - " << glambda[1] << std::endl;
-	  if (glambda[1]>max_glambda2) { std::cout << "Skipping this lambda value due to gene count thresholding..." << std::endl; continue; }
+	  if (glambda[1]>max_glambda2) {
+        std::cout << "Skipping this lambda value due to gene count thresholding..." << std::endl;
+        continue;
+      }
 	  sgl = new OLSGLassoLogisticR(features, responses, opts_ind, field, glambda, processSlepOpts(program.get<std::string>("slep")));
 
       //TODO: make out filename reflect lambda pair
@@ -111,6 +118,10 @@ int main(int argc, char *argv[]) {
 
       std::cout << "Non-zero gene count: " << sgl->NonZeroGeneCount() << std::endl;
       if (sgl->NonZeroGeneCount()<=auto_cancel_threshold){
+        if (glambda[1] == min_glambda2) {
+          std::cout << "Skipping all further lambda pairs due to gene count thresholding..." << std::endl;
+          break;
+        }
         max_glambda2 = glambda[1];
       }
     }
