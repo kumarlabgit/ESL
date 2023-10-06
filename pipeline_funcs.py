@@ -117,13 +117,10 @@ def generate_gene_prediction_table(weights_filename, responses_filename, groups_
 	for group in group_indices:
 		#print(group)
 		group_weights.append(numpy.asarray([model["weight_list"][field[x]] for x in range(group[0]-1, group[1])]))
-	# Open features file and process 1 row at a time,
-	#  can be modified to process in chunks that fit in memory later.
-	# print("Time elapsed while setting up gene prediction inputs/groups: {}".format(datetime.now() - start))
-	start = datetime.now()
 	#features = numpy.loadtxt(features_filename, delimiter=',')
 	# for (index, weight) in zip(group_indices, group_weights):
 	# 	group_sums.append(numpy.sum(features[:, field[index[0] - 1:index[1]]] * weight, 1))
+	#print(group_indices)
 	group_sums = numpy.stack([numpy.sum(features[:, field[index[0] - 1:index[1]]] * weight, 1) for (index, weight) in zip(group_indices, group_weights)]).transpose()
 	#predictions = numpy.sum(features * weight_list, 1) + model["intercept"]
 	predictions = numpy.sum(group_sums, 1) + model["intercept"]
@@ -136,10 +133,11 @@ def generate_gene_prediction_table(weights_filename, responses_filename, groups_
 					#gene_sums[i] = "N/A"
 					gene_sums[i] = numpy.nan
 			file.write("{}\t{}\t{}\t{}\t{}\n".format(seqid, responses[seqid], prediction, model["intercept"], "\t".join([str(x) for x in gene_sums])))
-	with open(str(output_filename).replace("_gene_predictions", "_GSS"), 'w') as file:
-		file.write("{}\t{}\n".format("Gene","GSS"))
-		for (gene, weights) in zip(gene_list, group_weights):
-			file.write("{}\t{}\n".format(gene, str(sum(numpy.abs(weights)))))
+	if "gene_predictions_xval" not in output_filename:
+		with open(str(output_filename).replace("_gene_predictions", "_GSS"), 'w') as file:
+			file.write("{}\t{}\n".format("Gene","GSS"))
+			for (gene, weights) in zip(gene_list, group_weights):
+				file.write("{}\t{}\n".format(gene, str(sum(numpy.abs(weights)))))
 
 
 # Takes a list of alignment files and splits it into randomly selected subsets of equal size and returns the filenames
@@ -407,10 +405,35 @@ def generate_hypothesis_set(args):
 	hypothesis_file_list = []
 	slep_opts_file_list = []
 	for nodename in responses.keys():
+		pos_idx = 1
+		neg_idx = 1
+		pos_idxs = []
+		neg_idxs = []
 		with open("{}_{}_hypothesis.txt".format(nodename, args.output), 'w') as file:
 			for taxa in taxa_list:
 				if responses[nodename][taxa] not in [0, "0"]:
 					file.write("{}\t{}\n".format(taxa, responses[nodename][taxa]))
+					if float(responses[nodename][taxa]) > 0:
+						pos_idxs.append(pos_idx)
+						pos_idx += 1
+						if pos_idx > args.xval:
+							pos_idx = 1
+					elif float(responses[nodename][taxa]) < 0:
+						neg_idxs.append(neg_idx)
+						neg_idx += 1
+						if neg_idx > args.xval:
+							neg_idx = 1
+		random.shuffle(pos_idxs)
+		random.shuffle(neg_idxs)
+		with open("{}_{}_xval_groups.txt".format(nodename, args.output), 'w') as file:
+			for taxa in taxa_list:
+				if responses[nodename][taxa] not in [0, "0"]:
+					if float(responses[nodename][taxa]) > 0:
+						#file.write("{}\t{}\n".format(taxa, pos_idxs.pop()))
+						file.write("{}\n".format(pos_idxs.pop()))
+					elif float(responses[nodename][taxa]) < 0:
+						#file.write("{}\t{}\n".format(taxa, neg_idxs.pop()))
+						file.write("{}\n".format(neg_idxs.pop()))
 		hypothesis_file_list += ["{}_{}_hypothesis.txt".format(nodename, args.output)]
 		if slep_sample_balance:
 			slep_opts_file_list += ["{}_{}_slep_opts.txt".format(nodename, args.output)]
@@ -551,6 +574,7 @@ def generate_input_matrices(alnlist_filename, hypothesis_filename_list, args):
 				shutil.move(os.path.join(output_basename, "feature_" + output_basename + ".txt"), os.path.join(output_basename, "feature_" + hypothesis_basename + ".txt"))
 				shutil.move(os.path.join(output_basename, "group_indices_" + output_basename + ".txt"), os.path.join(output_basename, "group_indices_" + hypothesis_basename + ".txt"))
 				shutil.move(os.path.join(output_basename, "response_" + output_basename + ".txt"), os.path.join(output_basename, "response_" + hypothesis_basename + ".txt"))
+				shutil.move(hypothesis_basename.replace("hypothesis", "xval_groups.txt"), os.path.join(output_basename, hypothesis_basename.replace("hypothesis", "xval_groups.txt")))
 				shutil.move(os.path.join(output_basename, "field_" + output_basename + ".txt"), os.path.join(output_basename, "field_" + hypothesis_basename + ".txt"))
 				shutil.move(os.path.join(output_basename, "feature_mapping_" + output_basename + ".txt"), os.path.join(output_basename, "feature_mapping_" + hypothesis_basename + ".txt"))
 				try:
@@ -608,7 +632,10 @@ def calculate_position_stats(aln_filename, hypothesis_filename):
 	return {"mic": mic, "entropy": entropy}
 
 
-def run_esl(features_filename_list, groups_filename_list, response_filename_list, field_filename_list, sparsity, group_sparsity, method, slep_opts_filename_list, z_ind = None, y_ind = None):
+def run_esl(features_filename_list, groups_filename_list, response_filename_list, field_filename_list, args, slep_opts_filename_list, z_ind = None, y_ind = None):
+	sparsity = args.lambda1
+	group_sparsity = args.lambda2
+	method = args.method
 	if method == "leastr":
 		method = "sg_lasso_leastr"
 	elif method == "logistic":
@@ -633,6 +660,8 @@ def run_esl(features_filename_list, groups_filename_list, response_filename_list
 			esl_cmd = "{} -f {} -z {} -y {} -n {} -r {} -s {} -w {}".format(esl_exe, features_filename, sparsity, group_sparsity, groups_filename, response_filename, slep_opts_filename, basename + "_out_feature_weights")
 		if method == "overlapping_sg_lasso_leastr":
 			esl_cmd = esl_cmd + " -g {}".format(field_filename)
+		if args.xval > 1:
+			esl_cmd = esl_cmd + " -x {}".format(response_filename.replace("response_", "").replace("hypothesis.txt", "xval_groups.txt"))
 		print(esl_cmd)
 #		subprocess.call("touch {}".format(basename + "_out_feature_weights.xml"), stderr=subprocess.STDOUT, shell=True)
 		subprocess.call(esl_cmd.split(" "), stderr=subprocess.STDOUT)
@@ -744,10 +773,46 @@ def process_weights(weights_file_list, hypothesis_file_list, groups_filename_lis
 		# outname = hypothesis_filename.replace("_hypothesis.txt", "_gene_predictions.txt")
 		outname = weights_filename.replace("_hypothesis", "").replace("_out_feature_weights.xml", "_gene_predictions.txt")
 		model = xml_model_to_dict(weights_filename)
-		generate_gene_prediction_table(weights_filename, hypothesis_filename, groups_filename, features_filename, outname, gene_list, missing_seqs, group_list, model, groups_filename.replace("group_indices_", "field_"))
+		features = numpy.loadtxt(features_filename, delimiter=',')
+		generate_gene_prediction_table(weights_filename, hypothesis_filename, groups_filename, features_filename, outname, gene_list, missing_seqs, group_list, model, features, groups_filename.replace("group_indices_", "field_"))
 		total_significance = generate_mapped_weights_file(weights_filename, groups_filename.replace("group_indices_", "feature_mapping_"), model)
 		os.remove(weights_filename)
 		HSS[hypothesis_filename] = HSS.get(hypothesis_filename, 0) + total_significance
+
+
+def process_xval_weights(weights_file_list, hypothesis_file_list, groups_filename_list, features_filename_list, gene_list, xval, missing_seqs, group_list):
+	for (weights_filename, hypothesis_filename, groups_filename, features_filename) in zip(weights_file_list, hypothesis_file_list, groups_filename_list, features_filename_list):
+		# outname = hypothesis_filename.replace("_hypothesis.txt", "_gene_predictions.txt")
+		features = numpy.loadtxt(features_filename, delimiter=',')
+		groups = numpy.loadtxt(hypothesis_filename.replace("_hypothesis", "_xval_groups"))
+		xval_predictions = []
+		header = ""
+		for xval_id in range(1, xval+1):
+			outname = weights_filename.replace("_hypothesis", "").replace("_out_feature_weights.xml", "_gene_predictions_xval_{}.txt".format(xval_id))
+			xval_hypothesis_filename = hypothesis_filename.replace("hypothesis.txt", "hypothesis_xval_{}.txt".format(xval_id))
+			with open(hypothesis_filename, 'r') as in_file:
+				with open(xval_hypothesis_filename, 'w') as out_file:
+					for i in range(0, len(groups)):
+						line = in_file.readline()
+						if groups[i] == xval_id:
+							out_file.write(line)
+			model = xml_model_to_dict(weights_filename.replace("_out_feature_weights.xml", "_out_feature_weights_xval_{}.xml".format(xval_id)))
+			generate_gene_prediction_table(weights_filename, xval_hypothesis_filename, groups_filename, features_filename, outname, gene_list, missing_seqs, group_list, model, features[numpy.where(groups == xval_id)[0]], groups_filename.replace("group_indices_", "field_"))
+			#total_significance = generate_mapped_weights_file(weights_filename, groups_filename.replace("group_indices_", "feature_mapping_"), model)
+			os.remove(weights_filename.replace("_out_feature_weights.xml", "_out_feature_weights_xval_{}.xml".format(xval_id)))
+			xval_predictions.append(numpy.loadtxt(outname, delimiter='	', skiprows=1, dtype=str))
+			if xval_id == 1:
+				with open(outname, 'r') as file:
+					header = file.readline().strip()
+			os.remove(outname)
+			os.remove(xval_hypothesis_filename)
+		#HSS[hypothesis_filename] = HSS.get(hypothesis_filename, 0) + total_significance
+		xval_predictions_fname = weights_filename.replace("_hypothesis", "").replace("_out_feature_weights.xml", "_gene_predictions_xval.txt")
+		with open(xval_predictions_fname, 'w') as file:
+			file.write(header + '\n')
+			numpy.savetxt(file, numpy.vstack(xval_predictions), delimiter='	', fmt='%s')
+
+
 
 
 def generate_mapped_weights_file(weights_filename, feature_map_filename, model):

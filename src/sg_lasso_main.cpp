@@ -1,3 +1,4 @@
+#include <set>
 #include <argparse.hpp>
 #include <armadillo>
 #include "sg_lasso.hpp"
@@ -33,6 +34,10 @@ int main(int argc, char *argv[]) {
   program.add_argument("-s", "--slep")
     .default_value(std::string("-"))
     .help("Specify a file of key/value SLEP options.");
+
+  program.add_argument("-x", "--xval")
+    .default_value(std::string("-"))
+    .help("Specify a file of cross-validation partition indices.");
 
   program.add_argument("-l", "--lambda_list")
     .default_value(std::string("-"))
@@ -79,9 +84,6 @@ int main(int argc, char *argv[]) {
   responses.load(csv_name(program.get<std::string>("response"),csv_opts::trans));
 
 
-
-
-
   if (responses.n_cols != features.n_cols)
   {
     //Log::Fatal << "The responses must have the same number of columns as the feature set." << endl;
@@ -89,6 +91,36 @@ int main(int argc, char *argv[]) {
   }
 
   opts_ind.load(csv_name(program.get<std::string>("groups"),csv_opts::trans));
+
+  if (program.get<std::string>("xval") != "-") {
+    std::cout << "Performing cross validation." << std::endl;
+    //std::vector<std::tuple<std::string, int>> xval_idxs = readXValFile(program.get<std::string>("xval"));
+    rowvec xval_idxs;
+    xval_idxs.load(csv_name(program.get<std::string>("xval"),csv_opts::trans));
+    std::set<int> xval_ids;
+
+    for(const auto& item : xval_idxs) {
+      xval_ids.insert(item);  // Insert the value into the set (automatically handles uniqueness)
+    }
+    xval_idxs.print("");
+
+
+    for(const auto& xval_id : xval_ids) {
+	  std::cout << "Performing cross validation" << xval_id << std::endl;
+      sgl = new SGLasso(features, responses, opts_ind, lambda, processSlepOpts(program.get<std::string>("slep")), xval_idxs, xval_id);
+      ofstream fileStream(program.get<std::string>("output") + "_xval_" + std::to_string(xval_id) + ".xml");
+      if (fileStream.is_open())
+      {
+        //fileStream << sgl->writeModelToXMLStream();
+        sgl->writeModelToXMLStream(fileStream);
+        fileStream.close();
+      } else {
+        std::cout << "Could not open output file for writing." << std::endl;
+      }
+    }
+
+    //return 0;
+  }
 
   if (program.get<std::string>("lambda_list") != "-") {
     std::vector<std::tuple<double, double>> lambda_list = readLambdaList(program.get<std::string>("lambda_list"));
@@ -203,6 +235,34 @@ std::vector<std::tuple<double, double>> readLambdaList(string filename)
 
   return data;
 }
+
+
+std::vector<std::tuple<std::string, int>> readXValFile(string filename)
+{
+  std::vector<std::tuple<std::string, int>> data;
+  std::string line;
+  std::ifstream file(filename);
+
+  if (!file) {
+    std::cerr << "Unable to open the file." << std::endl;
+    return data;
+  }
+
+
+
+  while (std::getline(file, line)) {
+    std::istringstream iss(line);
+	std:string val1;
+	int val2;
+
+	if (iss >> val1 && iss >> val2) {
+	  data.push_back(std::make_tuple(val1, val2));
+    }
+  }
+
+  return data;
+}
+
 
 std::string lambdaLabel(const double arr[], int idx) {
 

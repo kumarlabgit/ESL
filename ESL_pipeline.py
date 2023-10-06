@@ -69,6 +69,7 @@ def grid_search(args, original_output, input_files):
 			shutil.move(hypothesis_filename.replace("hypothesis.txt", "mapped_feature_weights_{}_{}.txt".format(lambda_pair1[0], lambda_pair1[1])), args.output)
 			shutil.move(hypothesis_filename.replace("hypothesis.txt", "PSS_{}_{}.txt".format(lambda_pair1[0], lambda_pair1[1])), args.output)
 			shutil.move(hypothesis_filename.replace("hypothesis.txt", "GSS_{}_{}.txt".format(lambda_pair1[0], lambda_pair1[1])), args.output)
+		#shutil.move(hypothesis_filename.replace("hypothesis.txt", "xval_groups.txt"), args.output)
 	# if args.auto_name_nodes:
 	#	shutil.move("auto_named_{}".format(os.path.basename(args.tree)), args.output)
 	with open(os.path.join(args.output, "HSS.txt"), 'w') as file:
@@ -108,7 +109,7 @@ def main(args):
 					for line in file:
 						data = line.strip().split("\t")
 						missing_seqs.add((data[1], os.path.splitext(os.path.basename(data[0]))[0]))
-				weights_file_list = pf.run_esl(features_filename_list, groups_filename_list, response_filename_list, field_filename_list, args.lambda1, args.lambda2, args.method, slep_opts_file_list)
+				weights_file_list = pf.run_esl(features_filename_list, groups_filename_list, response_filename_list, field_filename_list, args, slep_opts_file_list)
 				pf.process_weights(weights_file_list, hypothesis_file_list, groups_filename_list, features_filename_list, gene_list, HSS, missing_seqs, group_list)
 				for hypothesis_filename in hypothesis_file_list:
 					if i+1 == args.ensemble_coverage and j+1 == args.ensemble_parts and not args.sparsify:
@@ -121,6 +122,7 @@ def main(args):
 					shutil.move(hypothesis_filename.replace("hypothesis.txt", "mapped_feature_weights.txt"), args.output)
 					shutil.move(hypothesis_filename.replace("hypothesis.txt", "PSS.txt"), args.output)
 					shutil.move(hypothesis_filename.replace("hypothesis.txt", "GSS.txt"), args.output)
+					shutil.move(hypothesis_filename.replace("hypothesis.txt", "xval_groups.txt"), args.output)
 				shutil.move(args.output, tempdir)
 				j += 1
 			if not args.sparsify:
@@ -155,7 +157,13 @@ def main(args):
 			for line in file:
 				data = line.strip().split("\t")
 				missing_seqs.add((data[1], os.path.splitext(os.path.basename(data[0]))[0]))
-		weights_file_list = pf.run_esl(features_filename_list, groups_filename_list, response_filename_list, field_filename_list, args.lambda1, args.lambda2, args.method, slep_opts_file_list)
+		weights_file_list = pf.run_esl(features_filename_list, groups_filename_list, response_filename_list, field_filename_list, args, slep_opts_file_list)
+		if args.xval > 1:
+			for hypothesis_filename in hypothesis_file_list:
+				shutil.copy(os.path.join(args.output, hypothesis_filename.replace("hypothesis.txt", "xval_groups.txt")), hypothesis_filename.replace("hypothesis.txt", "xval_groups.txt"))
+			pf.process_xval_weights(weights_file_list, hypothesis_file_list, groups_filename_list, features_filename_list, gene_list, args.xval, missing_seqs, group_list)
+			for hypothesis_filename in hypothesis_file_list:
+				os.remove(hypothesis_filename.replace("hypothesis.txt", "xval_groups.txt"))
 		pf.process_weights(weights_file_list, hypothesis_file_list, groups_filename_list, features_filename_list, gene_list, HSS, missing_seqs, group_list)
 		for hypothesis_filename in hypothesis_file_list:
 			shutil.move(hypothesis_filename, args.output)
@@ -164,9 +172,12 @@ def main(args):
 			except:
 				pass
 			shutil.move(hypothesis_filename.replace("hypothesis.txt", "gene_predictions.txt"), args.output)
+			if args.xval > 1:
+				shutil.move(hypothesis_filename.replace("hypothesis.txt", "gene_predictions_xval.txt"), args.output)
 			shutil.move(hypothesis_filename.replace("hypothesis.txt", "mapped_feature_weights.txt"), args.output)
 			shutil.move(hypothesis_filename.replace("hypothesis.txt", "PSS.txt"), args.output)
 			shutil.move(hypothesis_filename.replace("hypothesis.txt", "GSS.txt"), args.output)
+			#shutil.move(hypothesis_filename.replace("hypothesis.txt", "xval_groups.txt"), args.output)
 		if args.auto_name_nodes:
 			shutil.move("auto_named_{}".format(os.path.basename(args.tree)), args.output)
 		with open(os.path.join(args.output, "HSS.txt"), 'w') as file:
@@ -177,6 +188,9 @@ def main(args):
 					shutil.move(hypothesis_filename.replace("hypothesis.txt", "slep_opts.txt"), args.output)
 					shutil.move(hypothesis_filename.replace("hypothesis.txt", "sweights.txt"), args.output)
 				gcv_files.append(gcv.main(os.path.join(args.output,hypothesis_filename.replace("hypothesis.txt", "gene_predictions.txt")),gene_limit=args.gene_display_limit, ssq_threshold=args.gene_display_cutoff))
+				if args.xval > 1:
+					print("{}-Fold Cross Validation Accuracy:".format(args.xval))
+					gcv_files.append(gcv.main(os.path.join(args.output, hypothesis_filename.replace("hypothesis.txt", "gene_predictions_xval.txt")), gene_limit=args.gene_display_limit, ssq_threshold=args.gene_display_cutoff))
 		for file in gcv_files:
 			if os.path.dirname(file)!=os.path.normpath(args.output):
 				shutil.move(file, args.output)
@@ -234,6 +248,7 @@ if __name__ == '__main__':
 	parser.add_argument("--method", help="SGLasso type to use. Options are \"logistic\", \"leastr\", or \"ol_leastr\". Defaults to \"leastr\".", type=str, default="logistic")
 	parser.add_argument("--slep_opts", help="File of tab-separated name-value pairs (one per line) to specify SLEP options.", type=str, default=None)
 	parser.add_argument("--gene_penalties", help="File of penalty values (same order as aln_list) to specify penalty score for each gene.", type=str, default=None)
+	parser.add_argument("--xval", help="Number of partitions to use when performing cross-validation.", type=int, default=1)
 	parser.add_argument("--gene_display_limit", help="Limits the number of genes displayed in the generated graph images.", type=int, default=100)
 	parser.add_argument("--gene_display_cutoff", help="Limits genes displayed in the generated graph images to those with sum-of-squares greater than cutoff value.", type=int, default=0.0)
 	args = parser.parse_args()

@@ -42,6 +42,16 @@ class OLSGLassoLeastR
                    std::map<std::string, std::string> slep_opts,
                    const bool intercept = true);
 
+  OLSGLassoLeastR(const arma::mat& features,
+                   const arma::rowvec& responses,
+                   const arma::mat& weights,
+                   const arma::rowvec& field,
+                   double* lambda,
+                   std::map<std::string, std::string> slep_opts,
+                   const arma::rowvec& xval_idxs,
+                   int xval_id,
+                   const bool intercept = true);
+
   /**
    * Empty constructor.  This gives a non-working model, so make sure Train() is
    * called (or make sure the model parameters are set) before calling

@@ -18,6 +18,25 @@ OLSGLassoLogisticR::OLSGLassoLogisticR(const arma::mat& features,
   Train(features, responses, weights, slep_opts, field, intercept);
 }
 
+
+OLSGLassoLogisticR::OLSGLassoLogisticR(const arma::mat& features,
+                                   const arma::rowvec& responses,
+                                   const arma::mat& weights,
+                                   const arma::rowvec& field,
+                                   double* lambda,
+                                   std::map<std::string, std::string> slep_opts,
+                                   const arma::rowvec& xval_idxs,
+                                   int xval_id,
+                                   const bool intercept) :
+    lambda(lambda),
+    intercept(intercept)
+{
+  //subset features and responses according to xval_id and xval_idxs
+  arma::uvec indices = arma::find(xval_idxs != xval_id);
+  Train(features.cols(indices), responses.elem(indices).t(), weights, slep_opts, field, intercept);
+}
+
+
 void OLSGLassoLogisticR::writeModelToXMLStream(std::ofstream& XMLFile)
 {
   int i_level = 0;
