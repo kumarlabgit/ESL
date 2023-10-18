@@ -845,6 +845,7 @@ def generate_mapped_weights_file(weights_filename, feature_map_filename, model):
 				posname_list.append(posname)
 				last_posname = posname
 			PSS[posname] = PSS.get(posname, 0.0) + abs(model["weight_list"][i])
+		file.write("{}\t{}\n".format("Intercept", model["intercept"]))
 	with open(str(output_filename).replace("_mapped_feature_weights", "_PSS"), 'w') as file:
 		if len(pos_stats) > 1:
 			file.write("{}\t{}\t{}\n".format("Position Name", "PSS", '\t'.join(pos_stats["Position Name"])))
