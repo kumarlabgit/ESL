@@ -63,6 +63,30 @@ void SGLassoLeastR::writeModelToXMLStream(std::ofstream& XMLFile)
 
 }
 
+void SGLassoLeastR::writeSparseMappedWeightsToStream(std::ofstream& MappedWeightsFile, std::ifstream& FeatureMap)
+{
+  std::string line;
+  std::getline(FeatureMap, line);
+  for(int i=0; i<this->parameters.n_elem; i++)
+  {
+    std::getline(FeatureMap, line);
+    if (this->parameters(i) == 0.0)
+    {
+	  continue;
+    }
+    std::istringstream iss(line);
+    std::string feature_label;
+    std::getline(iss, feature_label, '\t');
+    std::getline(iss, feature_label, '\t');
+    std::ostringstream streamObj;
+    streamObj << std::setprecision(17) << std::scientific << this->parameters(i);
+    MappedWeightsFile << feature_label + "	" + streamObj.str() + "\n";
+  }
+  MappedWeightsFile << "Intercept	" + std::to_string(this->intercept_value) + "\n";
+  FeatureMap.clear();
+  FeatureMap.seekg(0);
+}
+
 //double SGLassoLeastR::Train(const arma::mat& features,
 //                               const arma::rowvec& responses,
 //                               const bool intercept)

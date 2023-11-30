@@ -94,6 +94,7 @@ class SGLasso
                const bool intercept = true);
 
   void writeModelToXMLStream(std::ofstream& XMLFile);
+  void writeSparseMappedWeightsToStream(std::ofstream& MappedWeightsFile, std::ifstream& FeatureMap);
 
 
   /**

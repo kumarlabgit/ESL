@@ -38,7 +38,7 @@ def grid_search(args, original_output, input_files):
 	timers["LASSO"] = datetime.now() - start
 	print("Time elapsed while performing LASSO operations: {}".format(timers["LASSO"]))
 	start = datetime.now()
-	missing_results = pf.process_grid_weights(weights_file_list, hypothesis_file_list, groups_filename_list, features_filename_list, gene_list, HSS, missing_seqs, group_list, args)
+	missing_results = pf.process_sparse_grid_weights(weights_file_list, hypothesis_file_list, groups_filename_list, HSS, missing_seqs, args)
 	timers["post_processing"] = datetime.now() - start
 	print("Total time elapsed while processing LASSO results: {}".format(timers["post_processing"]))
 	#os.mkdir(args.output)
@@ -66,7 +66,7 @@ def grid_search(args, original_output, input_files):
 				except:
 					pass
 			shutil.move(hypothesis_filename.replace("hypothesis.txt", "gene_predictions_{}_{}.txt".format(lambda_pair1[0], lambda_pair1[1])), args.output)
-			shutil.move(hypothesis_filename.replace("hypothesis.txt", "mapped_feature_weights_{}_{}.txt".format(lambda_pair1[0], lambda_pair1[1])), args.output)
+			shutil.move(hypothesis_filename.replace("hypothesis.txt", "hypothesis_out_feature_weights_{}_{}.txt".format(lambda_pair1[0], lambda_pair1[1])), args.output)
 			shutil.move(hypothesis_filename.replace("hypothesis.txt", "PSS_{}_{}.txt".format(lambda_pair1[0], lambda_pair1[1])), args.output)
 			shutil.move(hypothesis_filename.replace("hypothesis.txt", "GSS_{}_{}.txt".format(lambda_pair1[0], lambda_pair1[1])), args.output)
 		#shutil.move(hypothesis_filename.replace("hypothesis.txt", "xval_groups.txt"), args.output)
@@ -161,10 +161,12 @@ def main(args):
 		if args.xval > 1:
 			for hypothesis_filename in hypothesis_file_list:
 				shutil.copy(os.path.join(args.output, hypothesis_filename.replace("hypothesis.txt", "xval_groups.txt")), hypothesis_filename.replace("hypothesis.txt", "xval_groups.txt"))
-			pf.process_xval_weights(weights_file_list, hypothesis_file_list, groups_filename_list, features_filename_list, gene_list, args.xval, missing_seqs, group_list)
+#			pf.process_xval_weights(weights_file_list, hypothesis_file_list, groups_filename_list, features_filename_list, gene_list, args.xval, missing_seqs, group_list)
+			pf.process_sparse_xval_weights(weights_file_list, hypothesis_file_list, groups_filename_list, args.aln_list, gene_list, args.xval, missing_seqs, group_list)
 			for hypothesis_filename in hypothesis_file_list:
 				os.remove(hypothesis_filename.replace("hypothesis.txt", "xval_groups.txt"))
-		pf.process_weights(weights_file_list, hypothesis_file_list, groups_filename_list, features_filename_list, gene_list, HSS, missing_seqs, group_list)
+		# pf.process_weights(weights_file_list, hypothesis_file_list, groups_filename_list, features_filename_list, gene_list, HSS, missing_seqs, group_list)
+		pf.process_sparse_weights(weights_file_list, hypothesis_file_list, groups_filename_list, HSS, missing_seqs, args)
 		for hypothesis_filename in hypothesis_file_list:
 			shutil.move(hypothesis_filename, args.output)
 			try:
@@ -174,8 +176,8 @@ def main(args):
 			shutil.move(hypothesis_filename.replace("hypothesis.txt", "gene_predictions.txt"), args.output)
 			if args.xval > 1:
 				shutil.move(hypothesis_filename.replace("hypothesis.txt", "gene_predictions_xval.txt"), args.output)
-			shutil.move(hypothesis_filename.replace("hypothesis.txt", "mapped_feature_weights.txt"), args.output)
-			shutil.move(hypothesis_filename.replace("hypothesis.txt", "PSS.txt"), args.output)
+			# shutil.move(hypothesis_filename.replace("hypothesis.txt", "mapped_feature_weights.txt"), args.output)
+			# shutil.move(hypothesis_filename.replace("hypothesis.txt", "PSS.txt"), args.output)
 			shutil.move(hypothesis_filename.replace("hypothesis.txt", "GSS.txt"), args.output)
 			#shutil.move(hypothesis_filename.replace("hypothesis.txt", "xval_groups.txt"), args.output)
 		if args.auto_name_nodes:
@@ -334,20 +336,31 @@ if __name__ == '__main__':
 			# Write aggregated GSS file
 			with open(os.path.join(args_original.output, "{}_GSS_median.txt".format(hypothesis)), 'w') as file:
 				for gene in gss_vals.keys():
-					file.write("{}\t{}\n".format(gene, statistics.median([float(x) for x in gss_vals[gene].values() if x != 0])))
+					gss_temp = [float(x) for x in gss_vals[gene].values() if abs(float(x)) > 0]
+					if len(gss_temp) == 0:
+						gss_temp = [0]
+					file.write("{}\t{}\n".format(gene, statistics.median(gss_temp)))
 			# Write aggregated PSS file
 			with open(os.path.join(args_original.output, "{}_PSS_median.txt".format(hypothesis)), 'w') as file:
 				for pos in pss_vals.keys():
-					file.write("{}\t{}\n".format(pos, statistics.median([float(x) for x in pss_vals[pos].values() if x != 0])))
+					pss_temp = [float(x) for x in pss_vals[pos].values() if abs(float(x)) > 0]
+					if len(pss_temp) == 0:
+						pss_temp = [0]
+					file.write("{}\t{}\n".format(pos, statistics.median(pss_temp)))
 			# Write aggregated gene_predictions file
 			with open(os.path.join(args_original.output, "{}_GCS_median.txt".format(hypothesis)), 'w') as file:
-				file.write("SeqID\tResponse\tPrediction_mean\t{}\n".format("\t".join([gene for gene in gene_predictions[0].columns if gene not in ["SeqID", "Prediction", "Intercept", "Response"]])))
+				gene_list = []
+				for gene_prediction in gene_predictions:
+					for column in gene_prediction.columns:
+						if column not in gene_list:
+							gene_list.append(column)
+				file.write("SeqID\tResponse\tPrediction_mean\t{}\n".format("\t".join([gene for gene in gene_list if gene not in ["SeqID", "Prediction", "Intercept", "Response"]])))
 				for species in gene_predictions[0].index:
 					file.write("{}\t".format(species))
-					for gene in gene_predictions[0].columns:
+					for gene in gene_list:
 						if gene in ["SeqID", "Intercept"]:
 							continue
-						GCS_list = [x[gene][species] for x in gene_predictions if x[gene][species] != 0]
+						GCS_list = [x[gene][species] for x in gene_predictions if gene in x.columns.values.tolist() and x[gene][species] != 0]
 						if len(GCS_list) == 0:
 							GCS_list = [0]
 						# if gene == "Response":

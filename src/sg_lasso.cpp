@@ -63,6 +63,42 @@ void SGLasso::writeModelToXMLStream(std::ofstream& XMLFile)
 
 }
 
+void SGLasso::writeSparseMappedWeightsToStream(std::ofstream& MappedWeightsFile, std::ifstream& FeatureMap)
+{
+  /*
+  int i_level = 0;
+  //std::string XMLString = "";
+  XMLFile << std::string(i_level * 8, ' ') + "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\" ?>" + "\n";
+  XMLFile << std::string(i_level * 8, ' ') + "<model>" + "\n";
+  i_level++;
+  XMLFile << std::string(i_level * 8, ' ') + "<parameters>" + "\n";
+  i_level++;
+  XMLFile << std::string(i_level * 8, ' ') + "<n_rows>" + std::to_string(this->parameters.n_cols) + "</n_rows>" + "\n";
+  XMLFile << std::string(i_level * 8, ' ') + "<n_cols>" + std::to_string(this->parameters.n_rows) + "</n_cols>" + "\n";
+  XMLFile << std::string(i_level * 8, ' ') + "<n_elem>" + std::to_string(this->parameters.n_elem) + "</n_elem>" + "\n";
+  */
+  std::string line;
+  std::getline(FeatureMap, line);
+  //for(int i=0; i<this->parameters.n_cols; i++)
+  for(int i=0; i<this->parameters.n_elem; i++)
+  {
+    std::getline(FeatureMap, line);
+    if (this->parameters(i) == 0.0)
+    {
+	  continue;
+    }
+    std::istringstream iss(line);
+    std::string feature_label;
+    std::getline(iss, feature_label, '\t');
+    std::getline(iss, feature_label, '\t');
+    std::ostringstream streamObj;
+    streamObj << std::setprecision(17) << std::scientific << this->parameters(i);
+    MappedWeightsFile << feature_label + "	" + streamObj.str() + "\n";
+  }
+  MappedWeightsFile << "Intercept	" + std::to_string(this->intercept_value) + "\n";
+  FeatureMap.clear();
+  FeatureMap.seekg(0);
+}
 
 
 arma::rowvec& SGLasso::Train(const arma::mat& features,

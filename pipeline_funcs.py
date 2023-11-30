@@ -6,6 +6,7 @@ import time
 import random
 import shutil
 import numpy
+from numpy.lib import recfunctions as rfn
 import xml.etree.ElementTree as ET
 import multiprocessing
 from Bio import Phylo
@@ -88,6 +89,160 @@ def analyze_ensemble_weights(args, weights):
 				file.write("{}\t{}\t{}\n".format(gene, totals[gene], scores[gene]))
 		score_tables[hypothesis] = {gene:(totals[gene], scores[gene]) for gene in weights[hypothesis].keys()}
 	return score_tables
+
+
+def apply_group_weights(aln_list_file, gene_sums, group_weights_file, species_list):
+	group_sums = {}
+	aln_list = []
+	gene_list = list(gene_sums.keys())
+	with open(aln_list_file, 'r') as file:
+		for line in file:
+			group_name = ",".join([os.path.splitext(os.path.basename(aln_filename))[0] for aln_filename in line.strip().split(",") if os.path.splitext(os.path.basename(aln_filename))[0] in gene_list])
+			#if group_name != '':
+			aln_list.append(group_name)
+	group_weight_list = []
+	with open(group_weights_file, 'r') as file:
+		file.readline()
+		file.readline()
+		for weight in file.readline().strip().split(","):
+			group_weight_list.append(float(weight))
+	# print("aln_list len: {}\n group_weight_list len: {}".format(len(aln_list), len(group_weight_list)))
+	for (aln_group, group_weight) in zip(aln_list, group_weight_list):
+		if aln_group == '':
+			continue
+		group_sums[aln_group] = {}
+		for seq_id in species_list:
+			# group_sums[aln_group][seq_id] = sum([gene_sums[x].get(seq_id, numpy.nan) for x in aln_group.split(",")]) * group_weight
+			group_sums[aln_group][seq_id] = sum([gene_sums[x].get(seq_id, 0) for x in aln_group.split(",")])
+	return group_sums
+
+
+def read_fasta(filename):
+	with open(filename, 'r') as file:
+		sequences = {}
+		sequence = ''
+		key = ''
+		for line in file:
+			if line.startswith('>'):
+				if key and sequence:  # not empty
+					sequences[key] = sequence
+					sequence = ''  # reset for next sequence
+				key = line.strip()[1:]  # remove '>' and newline character
+			else:
+				sequence += line.strip()  # concatenate lines of sequence
+		if key and sequence:  # for the last sequence in file
+			sequences[key] = sequence
+	return sequences
+
+
+def parse_response_file(response_filename, species_list):
+	responses = {seq_id: None for seq_id in species_list}
+	seq_order = []
+	with open(response_filename, 'r') as file:
+		custom_responses = [tuple(line.strip().split("\t")) for line in file]
+		for custom_response in custom_responses:
+			if responses[custom_response[0]] is None:
+				responses[custom_response[0]] = custom_response[1]
+				seq_order.append(custom_response[0])
+			else:
+				raise Exception("Response value of sequence {} specified more than once".format(custom_response[0]))
+	# for seq_id in responses.keys():
+	# 	if responses[seq_id] is None:
+	# 		responses[seq_id] = "0"
+	sorted_responses = {seq_id: responses[seq_id] for seq_id in seq_order}
+	sorted_responses.update({seq_id: responses[seq_id] for seq_id in responses.keys() if seq_id not in seq_order})
+	return sorted_responses
+
+
+def extract_gene_sums(aln_list, aln_lib, model):
+	gene_files = {}
+	gene_sums = {}
+	gene_signifcance_scores = {}
+	aln_dir = os.path.dirname(aln_list)
+	with open(aln_list, 'r') as file:
+		for line in file:
+			for aln_filename in line.strip().split(","):
+				gene_files[os.path.splitext(os.path.basename(aln_filename.strip()))[0]] = os.path.join(aln_dir, aln_filename.strip())
+	found_gene_list = list(gene_files.keys())
+	for gene in model.keys():
+		if gene == "Intercept":
+			continue
+		elif gene not in found_gene_list:
+			raise Exception("Gene {} present in model, but not present in input files.".format(gene))
+	for gene in model.keys():
+		if gene == "Intercept":
+			continue
+		gene_sums[gene] = {}
+		if gene not in aln_lib.keys():
+			aln_lib[gene] = read_fasta(gene_files[gene])
+		for seq_id in aln_lib[gene].keys():
+			gene_sums[gene][seq_id] = sum([model[gene][pos].get(aln_lib[gene][seq_id][pos], 0) for pos in model[gene].keys()])
+		# gene_signifcance_scores[gene] = sum([sum(model[gene][pos].values()) for pos in model[gene].keys()])
+		gene_signifcance_scores[gene] = sum([sum([abs(val) for val in pos.values()]) for pos in model[gene].values()])
+	return gene_sums, gene_signifcance_scores
+
+
+def read_ESL_model(filename):
+	model = {}
+	last_gene = ""
+	last_pos = -1
+	with open(filename, 'r') as file:
+		for line in file:
+			data = line.strip().split("\t")
+			if data[0] == "Intercept":
+				model["Intercept"] = float(data[1])
+				continue
+			feature = data[0].split("_")
+			gene = "_".join(feature[0:-2])
+			pos = int(feature[-2])
+			allele = feature[-1]
+			weight = float(data[1])
+			if gene != last_gene:
+				model[gene] = {pos: {allele: weight}}
+			elif pos != last_pos:
+				model[gene].update({pos: {allele: weight}})
+			else:
+				model[gene][pos].update({allele: weight})
+			last_gene = gene
+			last_pos = pos
+	return model
+
+
+def apply_ESL_model(aln_list, aln_lib, model_file, hypothesis_file, groups_filename, output_filename, missing_seqs):
+	model_dir = os.path.dirname(model_file)
+#	model_basename = os.path.splitext(os.path.basename(hypothesis_file))[0].replace("_hypothesis", "").replace("_mapped_feature_weights", "")
+#	model = read_ESL_model(os.path.join(model_dir, model_basename + "_hypothesis_out_feature_weights.txt"))
+	model = read_ESL_model(model_file)
+	gene_sums, gene_significance_scores = extract_gene_sums(aln_list, aln_lib, model)
+	species_list = set()
+	for gene in gene_sums.keys():
+		species_list.update(list(gene_sums[gene].keys()))
+	response = parse_response_file(hypothesis_file, species_list)
+	weighted_group_sums = apply_group_weights(aln_list, gene_sums, groups_filename, species_list)
+	group_list = list(weighted_group_sums.keys())
+	with open(output_filename, 'w') as file:
+		# file.write("SeqID\tResponse\tPrediction\tIntercept\t{}\n".format("\t".join([",".join(x) for x in gene_list])))
+		# file.write("SeqID\tResponse\tPrediction\tIntercept\t{}\n".format("\t".join(gene_list)))
+		file.write("SeqID\tResponse\tPrediction\tIntercept\t{}\n".format("\t".join(group_list)))
+		for seq_id in species_list:
+			if response[seq_id] is None:
+				continue
+			prediction = model["Intercept"]
+			for group in group_list:
+				prediction += weighted_group_sums[group].get(seq_id, 0)
+			#for i in range(0, len(gene_sums)):
+			for group in group_list:
+				if sum([1 for x in group.split(",") if (seq_id, x) in missing_seqs]) == len(group):
+					#gene_sums[i] = numpy.nan
+					weighted_group_sums[group] = numpy.nan
+			file.write("{}\t{}\t{}\t{}\t{}\n".format(seq_id, response[seq_id], prediction, model["Intercept"],
+													 "\t".join([str(weighted_group_sums[group].get(seq_id, numpy.nan)) for group in group_list])))
+	if "gene_predictions_xval" not in output_filename:
+		with open(str(output_filename).replace("_gene_predictions", "_GSS"), 'w') as file:
+			file.write("{}\t{}\n".format("Gene","GSS"))
+			# for (gene, weights) in zip(gene_list, group_weights):
+			for gene in gene_significance_scores.keys():
+				file.write("{}\t{}\n".format(gene, str(gene_significance_scores[gene])))
 
 
 def generate_gene_prediction_table(weights_filename, responses_filename, groups_filename, features_filename, output_filename, gene_list, missing_seqs, group_list, model, features, field_filename=None):
@@ -658,14 +813,15 @@ def run_esl(features_filename_list, groups_filename_list, response_filename_list
 			esl_cmd = "{} -f {} -z {} -y {} -n {} -r {} -w {}".format(esl_exe, features_filename, sparsity, group_sparsity, groups_filename, response_filename, basename + "_out_feature_weights")
 		else:
 			esl_cmd = "{} -f {} -z {} -y {} -n {} -r {} -s {} -w {}".format(esl_exe, features_filename, sparsity, group_sparsity, groups_filename, response_filename, slep_opts_filename, basename + "_out_feature_weights")
-		if method == "overlapping_sg_lasso_leastr":
+		if method in ["overlapping_sg_lasso_leastr", "overlapping_sg_lasso_logisticr"]:
 			esl_cmd = esl_cmd + " -g {}".format(field_filename)
 		if args.xval > 1:
 			esl_cmd = esl_cmd + " -x {}".format(response_filename.replace("response_", "").replace("hypothesis.txt", "xval_groups.txt"))
+		esl_cmd = esl_cmd + " --model_format flat"
 		print(esl_cmd)
 #		subprocess.call("touch {}".format(basename + "_out_feature_weights.xml"), stderr=subprocess.STDOUT, shell=True)
 		subprocess.call(esl_cmd.split(" "), stderr=subprocess.STDOUT)
-		weights_file_list.append(basename + "_out_feature_weights.xml")
+		weights_file_list.append(basename + "_out_feature_weights.txt")
 	return weights_file_list
 
 
@@ -697,21 +853,22 @@ def run_esl_grid(features_filename_list, groups_filename_list, response_filename
 			esl_cmd = "{} -f {} -z {} -y {} -n {} -r {} -w {}".format(esl_exe, features_filename, sparsity, group_sparsity, groups_filename, response_filename, basename + "_out_feature_weights")
 		else:
 			esl_cmd = "{} -f {} -z {} -y {} -n {} -r {} -s {} -w {}".format(esl_exe, features_filename, sparsity, group_sparsity, groups_filename, response_filename, slep_opts_filename, basename + "_out_feature_weights")
-		if method == "overlapping_sg_lasso_leastr":
+		if method in ["overlapping_sg_lasso_leastr", "overlapping_sg_lasso_logisticr"]:
 			esl_cmd = esl_cmd + " -g {}".format(field_filename)
 		esl_cmd = esl_cmd + " -l {}".format(lambda_list_filename)
 		if args.grid_gene_threshold:
 			esl_cmd = esl_cmd + " -c {}".format(args.grid_gene_threshold)
+		esl_cmd = esl_cmd + " --model_format flat"
 		print(esl_cmd)
 		#subprocess.call("touch {}".format(basename + "_out_feature_weights.xml"), stderr=subprocess.STDOUT, shell=True)
 		if args.skip_processing:
-			for xml_file in ["{}_out_feature_weights_{}_{}.xml".format(basename, lambda_val2label(val[0]), lambda_val2label(val[1])) for val in lambda_list]:
-				if not os.path.exists(xml_file):
-					raise Exception("Processing skipped, but no xml results file detected at {}.".format(xml_file))
-			print("All expected XML result files detected, skipping processing step...")
+			for model_file in ["{}_out_feature_weights_{}_{}.txt".format(basename, lambda_val2label(val[0]), lambda_val2label(val[1])) for val in lambda_list]:
+				if not os.path.exists(model_file):
+					raise Exception("Processing skipped, but no model file detected at {}.".format(model_file))
+			print("All expected model files detected, skipping processing step...")
 		else:
 			subprocess.call(esl_cmd.split(" "), stderr=subprocess.STDOUT)
-		weights_file_list.append(["{}_out_feature_weights_{}_{}.xml".format(basename, lambda_val2label(val[0]), lambda_val2label(val[1])) for val in lambda_list])
+		weights_file_list.append(["{}_out_feature_weights_{}_{}.txt".format(basename, lambda_val2label(val[0]), lambda_val2label(val[1])) for val in lambda_list])
 	return weights_file_list
 
 
@@ -724,12 +881,8 @@ def lambda_val2label(lambda_val):
 
 
 def process_grid_weights(weights_file_list, hypothesis_file_list, groups_filename_list, features_filename_list, gene_list, HSS, missing_seqs, group_list, args):
-	# grid_threads = args.grid_threads
-	# if grid_threads is None:
-	# 	grid_threads = multiprocessing.cpu_count() - 1
-	# thread_pool = multiprocessing.Pool(grid_threads)
-	# pool_results = {hypothesis_filename: [] for hypothesis_filename in hypothesis_file_list}
 	missing_results = []
+	aln_lib = {}
 	for (weights_filename_list, hypothesis_filename, groups_filename, features_filename) in zip(weights_file_list, hypothesis_file_list, groups_filename_list, features_filename_list):
 		# outname = hypothesis_filename.replace("_hypothesis.txt", "_gene_predictions.txt")
 		start = datetime.now()
@@ -761,23 +914,138 @@ def process_single_grid_weight(weights_filename, hypothesis_filename, groups_fil
 	generate_gene_prediction_table(weights_filename, hypothesis_filename, groups_filename, features_filename, outname, gene_list, missing_seqs, group_list, model, features, groups_filename.replace("group_indices_", "field_"))
 	print("Time elapsed while generating gene prediction table: {}".format(datetime.now() - start))
 	start = datetime.now()
-	total_significance = generate_mapped_weights_file(weights_filename, groups_filename.replace("group_indices_", "feature_mapping_"), model)
+	# total_significance = generate_mapped_weights_file(weights_filename, groups_filename.replace("group_indices_", "feature_mapping_"), model)
+	total_significance = generate_significance_scores(weights_filename.replace("_hypothesis", "").replace("_out_feature_weights.xml", "_mapped_feature_weights.txt"))
 	print("Time elapsed while generating mapped weights file: {}".format(datetime.now() - start))
 	if not args.preserve_xml:
 		os.remove(weights_filename)
 	return total_significance
 
+# def           process_weights(weights_file_list, hypothesis_file_list, groups_filename_list, features_filename_list, gene_list, HSS, missing_seqs, group_list):
+def process_sparse_grid_weights(weights_file_list, hypothesis_file_list, groups_filename_list, HSS, missing_seqs, args):
+	missing_results = []
+	aln_lib = {}
+	#for (weights_filename_list, hypothesis_filename, groups_filename, features_filename) in zip(weights_file_list, hypothesis_file_list, groups_filename_list, features_filename_list):
+	for (weights_filename_list, hypothesis_filename, groups_filename) in zip(weights_file_list, hypothesis_file_list, groups_filename_list):
+		# outname = hypothesis_filename.replace("_hypothesis.txt", "_gene_predictions.txt")
+		for weights_filename in weights_filename_list:
+			outname = weights_filename.replace("_hypothesis", "").replace("_out_feature_weights", "_gene_predictions").replace(".xml", ".txt")
+			# generate_gene_prediction_table(weights_filename, hypothesis_filename, groups_filename, features_filename, outname, gene_list, missing_seqs, group_list, groups_filename.replace("group_indices_", "field_"))
+			# total_significance = generate_mapped_weights_file(weights_filename, groups_filename.replace("group_indices_", "feature_mapping_"))
+			if os.path.exists(weights_filename):
+#				HSS[hypothesis_filename] = HSS.get(hypothesis_filename, 0) + process_single_grid_weight(weights_filename, hypothesis_filename, groups_filename, features_filename, outname, gene_list, missing_seqs, group_list, features, args)
+				HSS[hypothesis_filename] = HSS.get(hypothesis_filename, 0) + process_sparse_single_grid_weight(weights_filename, hypothesis_filename, groups_filename, outname, missing_seqs, aln_lib, args)
+			elif args.grid_gene_threshold is not None:
+				print("No results file detected, most likely due to grid_gene_threshold: {}".format(weights_filename))
+				missing_results.append(weights_filename)
+			else:
+				raise Exception("Missing results file: {}".format(weights_filename))
+	#	pool_results[hypothesis_filename].append(thread_pool.apply_async(process_single_grid_weight, args=(weights_filename, hypothesis_filename, groups_filename, features_filename, outname, gene_list, missing_seqs, group_list, args)))
+	# thread_pool.close()
+	# thread_pool.join()
+	# for hypothesis_filename in hypothesis_file_list:
+	# 	for pool_result in pool_results[hypothesis_filename]:
+	# 		HSS[hypothesis_filename] = HSS.get(hypothesis_filename, 0) + pool_result.get()
+	return missing_results
+
+
+def process_sparse_single_grid_weight(weights_filename, hypothesis_filename, groups_filename, outname, missing_seqs, aln_lib, args):
+#	start = datetime.now()
+#	model = xml_model_to_dict(weights_filename)
+	apply_ESL_model(args.aln_list, aln_lib, weights_filename, hypothesis_filename, groups_filename, outname, missing_seqs)
+#	generate_gene_prediction_table(weights_filename, hypothesis_filename, groups_filename, features_filename, outname, gene_list, missing_seqs, group_list, model, features, groups_filename.replace("group_indices_", "field_"))
+#	print("Time elapsed while generating gene prediction table: {}".format(datetime.now() - start))
+#	start = datetime.now()
+	# total_significance = generate_mapped_weights_file(weights_filename, groups_filename.replace("group_indices_", "feature_mapping_"), model)
+	#total_significance = generate_significance_scores(weights_filename.replace("_hypothesis", "").replace("_out_feature_weights.", "_mapped_feature_weights."))
+	total_significance = generate_significance_scores(weights_filename, groups_filename)
+#	print("Time elapsed while generating mapped weights file: {}".format(datetime.now() - start))
+#	if not args.preserve_xml:
+#		os.remove(weights_filename)
+	return total_significance
+
+
+def process_sparse_weights(weights_file_list, hypothesis_file_list, groups_filename_list, HSS, missing_seqs, args):
+	aln_list = args.aln_list
+	aln_lib = {}
+	for (weights_filename, hypothesis_filename, groups_filename) in zip(weights_file_list, hypothesis_file_list, groups_filename_list):
+		outname = weights_filename.replace("_hypothesis", "").replace("_out_feature_weights.txt", "_gene_predictions.txt")
+		apply_ESL_model(aln_list, aln_lib, weights_filename, hypothesis_filename, groups_filename, outname, missing_seqs)
+		# total_significance = generate_significance_scores(weights_filename.replace("_hypothesis", "").replace("_out_feature_weights.xml", "_mapped_feature_weights.txt"))
+		total_significance = generate_significance_scores(weights_filename, groups_filename)
+		shutil.move(weights_filename.replace("_hypothesis_out_feature_weights", "_PSS"), args.output)
+		#os.remove(weights_filename)
+		shutil.move(weights_filename, os.path.join(os.path.dirname(groups_filename), weights_filename.replace("_hypothesis_out_feature_weights.xml", "_mapped_feature_weights.txt")))
+		HSS[hypothesis_filename] = HSS.get(hypothesis_filename, 0) + total_significance
+
 
 def process_weights(weights_file_list, hypothesis_file_list, groups_filename_list, features_filename_list, gene_list, HSS, missing_seqs, group_list):
+	aln_lib = {}
 	for (weights_filename, hypothesis_filename, groups_filename, features_filename) in zip(weights_file_list, hypothesis_file_list, groups_filename_list, features_filename_list):
 		# outname = hypothesis_filename.replace("_hypothesis.txt", "_gene_predictions.txt")
 		outname = weights_filename.replace("_hypothesis", "").replace("_out_feature_weights.xml", "_gene_predictions.txt")
 		model = xml_model_to_dict(weights_filename)
 		features = numpy.loadtxt(features_filename, delimiter=',')
 		generate_gene_prediction_table(weights_filename, hypothesis_filename, groups_filename, features_filename, outname, gene_list, missing_seqs, group_list, model, features, groups_filename.replace("group_indices_", "field_"))
+		# apply_ESL_model(aln_list, aln_lib, model_file, hypothesis_filename, outname, missing_seqs)
 		total_significance = generate_mapped_weights_file(weights_filename, groups_filename.replace("group_indices_", "feature_mapping_"), model)
+		# total_significance = generate_significance_scores(weights_filename.replace("_hypothesis", "").replace("_out_feature_weights.xml", "_mapped_feature_weights.txt"))
 		os.remove(weights_filename)
 		HSS[hypothesis_filename] = HSS.get(hypothesis_filename, 0) + total_significance
+
+
+def process_sparse_xval_weights(weights_file_list, hypothesis_file_list, groups_filename_list, aln_list,                 gene_list, xval, missing_seqs, group_list):
+	aln_lib = {}
+#	for (weights_filename, hypothesis_filename, groups_filename, features_filename) in zip(weights_file_list, hypothesis_file_list, groups_filename_list, features_filename_list):
+	for (weights_filename, hypothesis_filename, groups_filename) in zip(weights_file_list, hypothesis_file_list, groups_filename_list):
+		# outname = hypothesis_filename.replace("_hypothesis.txt", "_gene_predictions.txt")
+		# features = numpy.loadtxt(features_filename, delimiter=',')
+		groups = numpy.loadtxt(hypothesis_filename.replace("_hypothesis", "_xval_groups"))
+		xval_predictions = []
+		header = ""
+		for xval_id in range(1, xval+1):
+			outname = weights_filename.replace("_hypothesis", "").replace("_out_feature_weights.txt", "_gene_predictions_xval_{}.txt".format(xval_id))
+			xval_hypothesis_filename = hypothesis_filename.replace("hypothesis.txt", "hypothesis_xval_{}.txt".format(xval_id))
+			xval_model_filename = weights_filename.replace("_out_feature_weights.txt", "_out_feature_weights_xval_{}.txt".format(xval_id))
+			with open(hypothesis_filename, 'r') as in_file:
+				with open(xval_hypothesis_filename, 'w') as out_file:
+					for i in range(0, len(groups)):
+						line = in_file.readline()
+						if groups[i] == xval_id:
+							out_file.write(line)
+			apply_ESL_model(aln_list, aln_lib, xval_model_filename, xval_hypothesis_filename, groups_filename, outname, missing_seqs)
+			#total_significance = generate_mapped_weights_file(weights_filename, groups_filename.replace("group_indices_", "feature_mapping_"), model)
+			os.remove(weights_filename.replace("_out_feature_weights.txt", "_out_feature_weights_xval_{}.txt".format(xval_id)))
+			xval_predictions.append(numpy.genfromtxt(outname, delimiter='	', names=True, dtype=None, encoding=None))
+			if xval_id == 1:
+				with open(outname, 'r') as file:
+					header = file.readline().strip()
+			os.remove(outname)
+			os.remove(xval_hypothesis_filename)
+		#HSS[hypothesis_filename] = HSS.get(hypothesis_filename, 0) + total_significance
+		xval_predictions_fname = weights_filename.replace("_hypothesis", "").replace("_out_feature_weights.txt", "_gene_predictions_xval.txt")
+		all_genes = set()
+		for prediction in xval_predictions:
+			all_genes.update(prediction.dtype.names)
+		all_columns = ['SeqID', 'Response', 'Prediction', 'Intercept']
+		for gene in all_genes:
+			if gene not in ['SeqID', 'Response', 'Prediction', 'Intercept']:
+				all_columns.append(gene)
+		combined_prediction = numpy.concatenate([add_missing_columns(xval_prediction, all_columns) for xval_prediction in xval_predictions])
+		with open(xval_predictions_fname, 'w') as file:
+			file.write(header + '\n')
+			numpy.savetxt(file, combined_prediction, delimiter='	', fmt='%s')
+
+
+# Function to add missing columns with zeros
+def add_missing_columns(data, columns):
+	missing_columns = set(columns) - set(data.dtype.names)
+	for column in missing_columns:
+		data = rfn.append_fields(data, column, [0]*len(data), dtypes=None, usemask=False)
+	data_reordered = numpy.empty(len(data), dtype=[(columns[0], 'U128')] + [(colname,'f8') for colname in columns if colname != 'SeqID'])
+	for column_name in columns:
+		data_reordered[column_name] = data[column_name]
+	return data_reordered
 
 
 def process_xval_weights(weights_file_list, hypothesis_file_list, groups_filename_list, features_filename_list, gene_list, xval, missing_seqs, group_list):
@@ -813,6 +1081,45 @@ def process_xval_weights(weights_file_list, hypothesis_file_list, groups_filenam
 			numpy.savetxt(file, numpy.vstack(xval_predictions), delimiter='	', fmt='%s')
 
 
+def generate_significance_scores(model_filename, groups_filename):
+	# Read weights and feature mapping files
+	PSS = {}
+	posname_list = []
+	last_posname = ""
+	feature_map = {}
+	pos_stats = {}
+	# output_filename = str(weights_filename).replace("_hypothesis_out_feature_weights.xml", "_mapped_feature_weights.txt")
+#	output_filename = str(groups_filename).replace("_hypothesis.txt", "_mapped_feature_weights.txt").replace("group_indices_", "")
+	with open(model_filename, 'r') as file:
+		for line in file:
+			data = line.strip().split("\t")
+			if len(data) == 2:
+				feature_map[data[0]] = float(data[1])
+	if os.path.exists(groups_filename.replace("group_indices_", "pos_stats_")):
+		with open(groups_filename.replace("group_indices_", "pos_stats_"), 'r') as file:
+			for line in file:
+				data = line.strip().split("\t")
+				if len(data) > 1:
+					pos_stats[data[0]] = data[1:]
+	for feature in feature_map.keys():
+		if feature == "Intercept":
+			continue
+		posname = feature[0:-2]
+		if posname != last_posname:
+			posname_list.append(posname)
+			last_posname = posname
+		PSS[posname] = PSS.get(posname, 0.0) + abs(feature_map[feature])
+	with open(str(model_filename).replace("_hypothesis_out_feature_weights", "_PSS"), 'w') as file:
+		if len(pos_stats) > 1:
+			file.write("{}\t{}\t{}\n".format("Position Name", "PSS", '\t'.join(pos_stats["Position Name"])))
+			for posname in posname_list:
+				file.write("{}\t{}\t{}\n".format(posname, PSS[posname], '\t'.join(pos_stats[posname])))
+		else:
+			file.write("{}\t{}\n".format("Position Name", "PSS"))
+			for posname in posname_list:
+				file.write("{}\t{}\n".format(posname, PSS[posname]))
+	# Return sum of all position significance scores
+	return sum(PSS.values())
 
 
 def generate_mapped_weights_file(weights_filename, feature_map_filename, model):

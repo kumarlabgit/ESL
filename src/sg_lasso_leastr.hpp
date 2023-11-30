@@ -98,6 +98,7 @@ class SGLassoLeastR
                const bool intercept = true);
 
   void writeModelToXMLStream(std::ofstream& XMLFile);
+  void writeSparseMappedWeightsToStream(std::ofstream& MappedWeightsFile, std::ifstream& FeatureMap);
 
   /**
    * Calculate y_i for each data point in points.

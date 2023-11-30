@@ -37,7 +37,7 @@ class OLSGLassoLogisticR
                const bool intercept = true);
 
   void writeModelToXMLStream(std::ofstream& XMLFile);
-
+  void writeSparseMappedWeightsToStream(std::ofstream& MappedWeightsFile, std::ifstream& FeatureMap);
 
   const arma::colvec altra(const arma::colvec& v_in,
                             const int n,
@@ -106,4 +106,4 @@ class OLSGLassoLogisticR
 };
 
 
-int countNonZeroGenes(const arma::vec& arr, const arma::mat& ranges);
+int countNonZeroGenes(const arma::vec& arr, const arma::mat& ranges, const arma::rowvec& field);

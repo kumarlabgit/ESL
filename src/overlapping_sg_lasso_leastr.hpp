@@ -96,7 +96,7 @@ class OLSGLassoLeastR
                const bool intercept = true);
 
   void writeModelToXMLStream(std::ofstream& XMLFile);
-
+  void writeSparseMappedWeightsToStream(std::ofstream& MappedWeightsFile, std::ifstream& FeatureMap);
   /**
    * Calculate y_i for each data point in points.
    *
@@ -197,4 +197,4 @@ class OLSGLassoLeastR
 
 //#endif // MLPACK_METHODS_OL_SG_LASSO_LEASTR_HPP
 
-int countNonZeroGenes(const arma::vec& arr, const arma::mat& ranges);
+int countNonZeroGenes(const arma::vec& arr, const arma::mat& ranges, const arma::rowvec& field);

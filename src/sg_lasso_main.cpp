@@ -53,6 +53,10 @@ int main(int argc, char *argv[]) {
     .help("Specify group feature sparsity.")
     .scan<'g', double>();
 
+  program.add_argument("--model_format")
+    .default_value(std::string("-"))
+    .help("Specify an output model format of either xml or flat (defaults to xml)");
+
   program.add_argument("-c", "--gene_count_threshold")
     .default_value(0)
     .help("Specify gene selection cutoff for grid-based model building.")
@@ -68,7 +72,8 @@ int main(int argc, char *argv[]) {
   }
 
   double lambda[2] = {program.get<double>("lambda1"), program.get<double>("lambda2")};
-
+  bool omit_zeroes;
+  string model_ext;
   mat features;
   mat opts_ind;
   rowvec responses;
@@ -76,6 +81,33 @@ int main(int argc, char *argv[]) {
   SGLasso* sgl;
 
   int auto_cancel_threshold = program.get<int>("gene_count_threshold");
+
+  std::ifstream feature_map_filestream;
+
+  if (program.get<std::string>("model_format") == "flat"){
+    omit_zeroes = true;
+    model_ext = ".txt";
+  } else {
+    omit_zeroes = false;
+    model_ext = ".xml";
+  }
+
+  if (omit_zeroes)
+  {
+    std::string feature_map_file = program.get<std::string>("features");
+    std::string from = "feature_";
+    std::string to = "feature_mapping_";
+    size_t startPos = feature_map_file.find(from);
+    if(startPos != std::string::npos)
+    {
+      feature_map_file.replace(startPos, from.length(), to);
+    }
+    feature_map_filestream.open(feature_map_file);
+    if (!feature_map_filestream)
+    {
+  	  throw std::invalid_argument("\nFeature mapping file(" + feature_map_file + ") not detected.\n");
+    }
+  }
 
   //features.load(csv_name(program.get<std::string>("features"),csv_opts::semicolon));
   features.load(csv_name(program.get<std::string>("features"),csv_opts::trans));
@@ -108,11 +140,16 @@ int main(int argc, char *argv[]) {
     for(const auto& xval_id : xval_ids) {
 	  std::cout << "Performing cross validation" << xval_id << std::endl;
       sgl = new SGLasso(features, responses, opts_ind, lambda, processSlepOpts(program.get<std::string>("slep")), xval_idxs, xval_id);
-      ofstream fileStream(program.get<std::string>("output") + "_xval_" + std::to_string(xval_id) + ".xml");
+      ofstream fileStream(program.get<std::string>("output") + "_xval_" + std::to_string(xval_id) + model_ext);
       if (fileStream.is_open())
       {
         //fileStream << sgl->writeModelToXMLStream();
-        sgl->writeModelToXMLStream(fileStream);
+        if (omit_zeroes)
+        {
+          sgl->writeSparseMappedWeightsToStream(fileStream, feature_map_filestream);
+        } else {
+          sgl->writeModelToXMLStream(fileStream);
+        }
         fileStream.close();
       } else {
         std::cout << "Could not open output file for writing." << std::endl;
@@ -140,10 +177,15 @@ int main(int argc, char *argv[]) {
 	  sgl = new SGLasso(features, responses, opts_ind, glambda, processSlepOpts(program.get<std::string>("slep")));
 
       //TODO: make out filename reflect lambda pair
-	  ofstream fileStream(program.get<std::string>("output") + lambdaLabel(glambda,0) + lambdaLabel(glambda,1) + ".xml");
+	  ofstream fileStream(program.get<std::string>("output") + lambdaLabel(glambda,0) + lambdaLabel(glambda,1) + model_ext);
 	  if (fileStream.is_open())
 	  {
-        sgl->writeModelToXMLStream(fileStream);
+        if (omit_zeroes)
+        {
+          sgl->writeSparseMappedWeightsToStream(fileStream, feature_map_filestream);
+        } else {
+          sgl->writeModelToXMLStream(fileStream);
+        }
         fileStream.close();
       } else {
         std::cout << "Could not open output file for writing." << std::endl;
@@ -167,11 +209,16 @@ int main(int argc, char *argv[]) {
   sgl = new SGLasso(features, responses, opts_ind, lambda, processSlepOpts(program.get<std::string>("slep")));
 
   //std::cout << sgl->writeModelToXMLStream();
-  ofstream fileStream(program.get<std::string>("output") + ".xml");
+  ofstream fileStream(program.get<std::string>("output") + model_ext);
   if (fileStream.is_open())
   {
     //fileStream << sgl->writeModelToXMLStream();
-    sgl->writeModelToXMLStream(fileStream);
+    if (omit_zeroes)
+    {
+	  sgl->writeSparseMappedWeightsToStream(fileStream, feature_map_filestream);
+    } else {
+      sgl->writeModelToXMLStream(fileStream);
+    }
     fileStream.close();
   } else {
     std::cout << "Could not open output file for writing." << std::endl;

@@ -66,6 +66,42 @@ void OLSGLassoLogisticR::writeModelToXMLStream(std::ofstream& XMLFile)
 
 }
 
+void OLSGLassoLogisticR::writeSparseMappedWeightsToStream(std::ofstream& MappedWeightsFile, std::ifstream& FeatureMap)
+{
+  /*
+  int i_level = 0;
+  //std::string XMLString = "";
+  XMLFile << std::string(i_level * 8, ' ') + "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\" ?>" + "\n";
+  XMLFile << std::string(i_level * 8, ' ') + "<model>" + "\n";
+  i_level++;
+  XMLFile << std::string(i_level * 8, ' ') + "<parameters>" + "\n";
+  i_level++;
+  XMLFile << std::string(i_level * 8, ' ') + "<n_rows>" + std::to_string(this->parameters.n_cols) + "</n_rows>" + "\n";
+  XMLFile << std::string(i_level * 8, ' ') + "<n_cols>" + std::to_string(this->parameters.n_rows) + "</n_cols>" + "\n";
+  XMLFile << std::string(i_level * 8, ' ') + "<n_elem>" + std::to_string(this->parameters.n_elem) + "</n_elem>" + "\n";
+  */
+  std::string line;
+  std::getline(FeatureMap, line);
+  //for(int i=0; i<this->parameters.n_cols; i++)
+  for(int i=0; i<this->parameters.n_elem; i++)
+  {
+    std::getline(FeatureMap, line);
+    if (this->parameters(i) == 0.0)
+    {
+	  continue;
+    }
+    std::istringstream iss(line);
+    std::string feature_label;
+    std::getline(iss, feature_label, '\t');
+    std::getline(iss, feature_label, '\t');
+    std::ostringstream streamObj;
+    streamObj << std::setprecision(17) << std::scientific << this->parameters(i);
+    MappedWeightsFile << feature_label + "	" + streamObj.str() + "\n";
+  }
+  MappedWeightsFile << "Intercept	" + std::to_string(this->intercept_value) + "\n";
+  FeatureMap.clear();
+  FeatureMap.seekg(0);
+}
 
 
 arma::rowvec& OLSGLassoLogisticR::Train(const arma::mat& features,
@@ -488,7 +524,7 @@ opts_ind = opts_ind.t(); //This might be wrong
   std::cout << "Intercept: " << c << std::endl;
   this->intercept_value = c;
 
-  this->nz_gene_count = countNonZeroGenes(parameters, weights);
+  this->nz_gene_count = countNonZeroGenes(parameters, weights, opts_field);
 
   return x_row;
 
@@ -708,10 +744,10 @@ const double OLSGLassoLogisticR::computeLambda2Max(const arma::rowvec& x_in,
 }
 
 
-int countNonZeroGenes(const arma::vec& arr, const arma::mat& ranges) {
-    auto detectNonZeroInRange = [&arr](int start, int end) -> int {
+int countNonZeroGenes(const arma::vec& arr, const arma::mat& ranges, const arma::rowvec& field) {
+    auto detectNonZeroInRange = [&arr](int start, int end, const arma::rowvec& field) -> int {
         for (int i = start; i <= end; ++i) {
-            if (arr(i) != 0) {
+            if (arr(field[i]) != 0) {
                 return 1;
             }
         }
@@ -722,7 +758,7 @@ int countNonZeroGenes(const arma::vec& arr, const arma::mat& ranges) {
     for (arma::uword i = 0; i < ranges.n_rows; ++i) {
         int start = static_cast<int>(ranges(i, 0))-1;
         int end = static_cast<int>(ranges(i, 1))-1;
-        count = count + detectNonZeroInRange(start, end);
+        count = count + detectNonZeroInRange(start, end, field);
     }
 
     //std::cout << "Number of non-zero genes: " << count << std::endl;
