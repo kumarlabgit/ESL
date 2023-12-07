@@ -1,176 +1,186 @@
-# Setup
+# Evolutionary Sparse Learning (ESL) #
 
-	git clone https://github.com/kumarlabgit/ESL ESL
+## Table of Contents ##
+
+1. [Description](#description)
+2. [SGLASSO](#SGLASSO)
+3. [Requirements](#requirements)
+4. [Setup](#setup)
+5. [Usage](#usage)
+6. [Output](#output)
+7. [C++ Components](#c++-components)
+
+## Description ##
+ESL (Evolutionary Sparse Learning) is a set of programs written in c++ provided with a python pipeline, designed to investigate various evolutionary/phylogenetic hypotheses, by applying the sparse group lasso penalty to regression optimization problems relating the provided hypothesis to a set of provided sequence alignments. ESL efficiently highlights genes, and positions within those genes, that show the greatest level of importance/discriminatory power in terms of a specific evolutionary hypothesis.
+
+
+## SGLASSO ##
+
+Applying the sparse group Lasso penalty yields a solution that achieves the within- and between- group sparsity simultaneously. That is, many feature groups are exactly zero (thus not selected) and within the non-zero (thus selected) feature groups, some features are also exactly zero. The simultaneous within- and between- group sparsity makes sparse group Lasso ideal for applications where we are interested in identifying important groups as well as important features within the selected groups.
+
+The algorithm can optimize feature weights under either a least squares or logistic regression model. Additionally, the overlapping variants of those programs can accept input where feature groups overlap.
+
+
+## Requirements ##
+
+To run ESL, you will need python 3.8 or later installed, as well as the following python packages
+
+- numpy
+- biopython
+- matplotlib
+- pandas
+
+You can install these libraries using pip:
+
+`pip install biopython numpy pandas matplotlib`
+
+## Setup ##
+
+To setup ESL, perform the following on the command line:
+
+	git clone -b grid_search https://github.com/kumarlabgit/ESL ESL
 	cd ESL
 	bash setup.sh
 
-Additionally, the phylogeny testing pipeline requires python>=3.8 to be installed, as well as the following python packages:
 
-	biopython
-	matplotlib
+## Usage: ##
 
-# Phylogeny Testing Pipeline
-
-The pipeline is implemented as a python script which takes a set of gene alignments and a newick tree with at least one named internal node then, for each named internal node, creates a model predicting the chance that a given sequence descends from that node, and finally applies each predictive model to each input sequence and generates a table of predictive values grouped by gene for each sequence.
-
-Usage:
+Once setup has been performed, the main pipeline can be applied to a set of alignment files and a hypothesis to determine the features/feature groups which have the most explanatory power in term of the provided hypothesis.
 
 	python ESL_pipeline.py tree_file.nwk alignment_list.txt [--parameter_name parameter_value] ... [--boolean_option] ...
 
-Options:
+ESL can also be run in cross-validation or grid-search modes, using the --xval or (--grid_z + --grid_y) parameters, respectively. When in grid-search mode, each regression will be run with various feature- and group- sparsity parameters, and the results for each hypothesis will be aggregated across runs, with options to filter result sets with low accuracy/predictive power.
 
-	required positional arguments:
-	  tree_file                       Newick tree file.
-	  alignment_list                  List of FASTA alignment files.
-	optional parameters:
-	  --nodelist <string>             File containing list of named internal nodes to test. If no file is specified, each named internal node of input phylogeny will be tested.
-	  --smart_sampling <int>          Mode 1: For each selected positive sample, attempt to select a balanced, phylogenetically informed negative sample.
-	  --cladesize_cutoff_lower <int>  Internal nodes with fewer than cladesize_cutoff_lower terminal descendants will not be tested.
-	  --cladesize_cutoff_upper <int>  Internal nodes with greater than cladesize_cutoff_upper terminal descendants will not be tested.
-	  --method <string>               SGLasso type to use. Options are "logistic", "leastr", "ol_logistic", or "ol_leastr". Defaults to "leastr".
-	  --lambda1 <float>               Feature sparsity parameter.
-	  --lambda2 <float>               Group sparsity parameter.
-	  --ensemble_parts <int>          Build gene-wise ensemble models, splitting the set of genes into ensemble_parts partitions for each run.
-	  --ensemble_coverage <int>       Number of ensemble models to build. Each gene will be included in this many individual models.
-	  --gene_penalties <string>       File of penalty values (same order as aln_list) to specify penalty score for each gene.
-	  --slep_opts <string>            File of tab-separated name-value pairs (one per line) to specify SLEP options.
-	  --auto_name_length <int>        Number of characters to take from sequence IDs when automatically generating internal node labels.
-	  --gene_display_limit <int>      Limits the number of genes displayed in the generated graph images.
-	  --gene_display_cutoff <float>   Limits genes displayed in the generated graph images to those with sum-of-squares greater than gene_display_cutoff.
-	  --output <string>               Output directory.
-	boolean options:
-	  --auto_name_nodes               Assign automatically generated names to unnamed internal nodes, causing them to be tested.
-	  --sparsify                      Iteratively increase sparsity until selected set of genes fits in one partition.
+Required arguments:
 
-sample usage:
+* `tree_file.nwk`: A newick formatted tree file specifying the phylogenetic groups used to construct the hypothesis. Multiple hypotheses can be contructed from the provided newick tree file, or a single hypothesis may be specified with a separate hypothesis file provided using the --response parameter. To specify a hypothesis using the newick tree, a label should be added to the internal node that will be used as the positive response group. For each labeled internal node, a hypothesis will be generated where all terminal children of that node will be assigned the +1 response value, and all other terminal nodes will be given the -1 response value.
 
-	python ESL_pipeline.py sample_files/ESL_test.nwk sample_files/angiosperm_100_sample_alns.txt --output sample_output
+* `alignment_list.txt`: The alignment list file should contain one alignment filename (or comma-separated group of alignment filenames, in the case of overlapping groups) on each line.
 
 
-# C++ Components
+Optional arguments:
 
-The phylogeny testing pipeline utilizes a set of programs written in C++ to transform inputs and perform individual sparse learning tasks. The individual programs have the following specifications.
+* `--response hypothesis_file.txt`: To specify a single hypothesis to test, unconstrained by tree structure, the --response parameter can be pointed to a tab-separated two-column text file which contains a sequence ID in the first column, and either -1, 1, or 0 in the second column. Sequences with a 0 in the hypothesis file will be ignored completely.
 
-## preprocess:
+* `--nodelist node_list.txt`: If the user does not wish to test a hypothesis for every labeled internal node, a node_list file may be used to specify a limited set of labeled internal nodes to test. The node_list file should have the name of one internally labeled node on each line.
 
-	parameter 1: response matrix file
-	parameter 2: file containing list of alignment file paths
-	parameter 3: basename of output files
-	optional parameters (must be specified after parameters 1-3):
-		is: "ignore singletons"
-		ct {N}: ignore mutations observed fewer than {N} times (must be an integer)
-sample usage:
+* `--output, -o output_dir`: Directory to place outputs in.
 
-	cd sample_files
-	../bin/preprocess angiosperm_20spec_pred.txt angiosperm_100_sample_alns.txt angiosperm_input n ct 2
-	mv angiosperm_input ..
-	cd ..
+* `--lambda1, -z <float>`: The feature level sparsity parameter, higher values will result in more feature sparsity, i.e. fewer features with a non-zero weight. Must be a positive, non-zero value less than one. Defaults to 0.1.
 
-Notes and Caveats
+* `--lambda2, -y <float>`: The group level sparsity parameter, higher values will result in more group sparsity, i.e. more feature groups in which *every* feature in the group has a value of zero. Must be a positive, non-zero value less than one. Defaults to 0.1.
 
-The paths for the alignment files must be relative to the directory that preprocess is run from.
+* `--method [leastr, logistic, ol_leastr, ol_logistic]`: The sparse group LASSO method to use (default: logistic).
 
-Any species with a response value of 0 in the predictions file (first argument to preprocess executable) will be left out of the features file entirely.
+* `--xval <int>`: Perform cross validation with N partitions for each hypothesis specified.
 
-The preprocessing script is not very well tested. The easiest way to check if it worked correctly is to inspect the feature mapping file - if something went wrong, it will usually have nonsense characters as the alleles for some feature columns.
+* `--grid_z [min,max,step_size]`: Run in grid-search mode with feature sparsity parameter in the specified range using the specified step-size. Must be used with --grid_y option.
 
-The list of alignments given to the preprocess program can also generate overlapping groups of input for the overlapping SGLasso algorithm, by specifying multiple comma-separated files/genes on a single line.
+* `--grid_y [min,max,step_size]`: Run in grid-search mode with group sparsity parameter in the specified range using the specified step-size. Must be used with --grid_z option.
 
-For example, for a non-overlapping set of input groups, the file might look like:
+* `--grid_rmse_cutoff <float>`: Filter models with RMSE above the cutoff when selecting models to aggregate.
 
-	aln_dir/gene1.fas
-	aln_dir/gene2.fas
-	aln_dir/gene3.fas
-	aln_dir/gene4.fas
+* `--grid_acc_cutoff <float>`: Filter models with accuracy below the cutoff when selecting models to aggregate (range:0.0 - 1.0).
 
-While input where gene2 shares properties with both gene1 and gene3 might look like:
+* `--grid_gene_threshold <int>`: Skip generating models that are guaranteed to produce less than or equal to this number of non-zero feature groups, i.e., skip generating a new model for any lambda pair where an existing model with L1<=new_L1 and L2<=new_L2 has the threshold number of genes or lower.
 
-	aln_dir/gene1.fas,aln_dir/gene2.fas
-	aln_dir/gene3.fas,aln_dir/gene2.fas
-	aln_dir/gene4.fas
+* `--auto_name_nodes`: If the user tree contains no labelled internal nodes, the --auto_name_nodes option may be specified to automatically generate names for each internal node, causing all each internal nodes to be used to generate a unique hypothesis for testing. Note: this may result in a very large number of hypotheses to be tested if the user tree is large, in which case it is suggested to also use the --cladesize_cutoff_lower and --cladesize_cutoff_upper parameters to limit the number of hypotheses that will be tested.
 
+* `--cladesize_cutoff_lower <int>`: Internal nodes with fewer than cladesize_cutoff_lower terminal descendants will not be tested.
 
-## sg_lasso_leastr
+* `--cladesize_cutoff_upper <int>`: Internal nodes with greater than cladesize_cutoff_upper terminal descendants will not be tested.
 
-	required inputs:
-	  --features_file (-f)          Matrix containing feature set A.
-	  --opts_ind_file (-n)          Matrix of indices defining non-overlapping group information.
-	  --responses_file (-r)         Vector containing responses y.
-	optional inputs:
-	  --feature_weights_file (-w)   Output file to write learned feature weights to.
-	  --lambda1 (-z)                Feature regularization parameter (z1 >=0). Default value 0.
-	  --lambda2 (-y)                Group regularization parameter (z2 >=0). Default value 0.
+* `--smart_sampling <int>`: Instead of assigning a -1 response value to all species not assigned a +1 value, smart sampling will try to select a phylogenetically informed negative sample of equal size to the positive sample. Modes:
 
-sample usage:
+* `--gene_penalties penalties.txt`: File of custom penalty values (same order as alignment list) to assign to alignments/groups/genes. Used to balance importance of feature groups of varying size.
 
-	bin/sg_lasso_leastr -f angiosperm_input/feature_angiosperm_input.txt -z 0.1 -y 0.5 -n angiosperm_input/group_indices_angiosperm_input.txt -r angiosperm_input/response_angiosperm_input.txt -w angiosperm_out_feature_weights
+Usage examples:
+
+Run basic ESL on a tree with 2 internally labeled nodes, producing a result set for each of two hypotheses generated from the input tree:
+	python3 ESL_pipeline.py sample_files/ESL_test.nwk sample_files/angiosperm_100_sample_alns.txt --output sample_tree_output
+
+Run basic ESL on a tree with 2 internally labeled nodes, but specify a single hypothesis/response file, ignoring the tree (a tree must still be specified) and producing a single result set for the provided response file:
+	python3 ESL_pipeline.py sample_files/ESL_test.nwk sample_files/angiosperm_100_sample_alns.txt --output sample_tree_output --response sample_files/test_pred.txt
+
+Run an ESL grid search with both lambda values in the range 0.05-0.1 and a step size of 0.05, specifying a single hypothesis/response file:
+	python3 ESL_pipeline.py sample_files/ESL_test.nwk sample_files/angiosperm_100_sample_alns.txt --grid_z 0.05,0.1,0.05 --grid_y 0.05,0.1,0.05 --output sample_grid2x2_output --response sample_files/test_pred.txt
+
+Run an ESL cross validation with 2 partitions, specifying a single hypothesis/response file:
+	python3 ESL_pipeline.py sample_files/ESL_test.nwk sample_files/angiosperm_100_sample_alns.txt --output sample_xval2_output --response sample_files/test_pred.txt --xval 2
+
+Run basic ESL on a tree with 2 internally labeled nodes, producing a result set for each of two hypotheses generated from the input tree, using overlapping feature groups:
+	python3 ESL_pipeline.py sample_files/ESL_test.nwk sample_files/angiosperm_100_sample_alns_overlapping.txt --output sample_tree_output_ol_logistic --method ol_logistic
 
 
-## overlapping_sg_lasso_leastr
+## Output ##
 
-	required inputs:
-	  --features_file (-f)          Matrix containing feature set A.
-	  --opts_ind_file (-n)          Matrix of indices defining overlapping group information.
-	  --field_file (-g)             Vector of feature indices for overlapping groups.
-	  --responses_file (-r)         Vector containing responses y.
-	optional inputs:
-	  --feature_weights_file (-w)   Output file to write learned feature weights to.
-	  --lambda1 (-z)                Feature regularization parameter (z1 >=0). Default value 0.
-	  --lambda2 (-y)                Group regularization parameter (z2 >=0). Default value 0.
+Basic Results Files
 
-sample usage:
+{internal_node_label}_{output_dir}_hypothesis_out_feature_weights.txt
+	Tab-separated, two-column file of all non-zero feature weights generated by the sparse group LASSO.
+	
+{internal_node_label}_{output_dir}_gene_predictions.txt
+	Table of predictions produced by model, including the total weight contributed by each feature group to each sample's total score.
 
-	bin/overlapping_sg_lasso_leastr -f angiosperm_input/feature_angiosperm_input.txt -z 0.1 -y 0.5 -n angiosperm_input/group_indices_angiosperm_input.txt -g angiosperm_input/field_angiosperm_input.txt -r angiosperm_input/response_angiosperm_input.txt -w angiosperm_out_feature_weights
+{internal_node_label}_{output_dir}_gene_predictions.png
+	Visual representation of *_gene_predictions.txt file.
 
-## sg_lasso
+{internal_node_label}_{output_dir}_PSS.txt
+	Position significance score for each position, calculated as the sum of absolute weights for each one-hot feature referring to that position. Only positions with non-zero significance are displayed. Also includes MIC values.
 
-	required inputs:
-	  --features_file (-f)          Matrix containing feature set A.
-	  --opts_ind_file (-n)          Matrix of indices defining non-overlapping group information.
-	  --responses_file (-r)         Vector containing responses y.
-	optional inputs:
-	  --feature_weights_file (-w)   Output file to write learned feature weights to.
-	  --lambda1 (-z)                Feature regularization parameter (z1 >=0). Default value 0.
-	  --lambda2 (-y)                Group regularization parameter (z2 >=0). Default value 0.
-
-sample usage:
-
-	bin/sg_lasso -f angiosperm_input/feature_angiosperm_input.txt -z 0.1 -y 0.5 -n angiosperm_input/group_indices_angiosperm_input.txt -r angiosperm_input/response_angiosperm_input.txt -w angiosperm_out_feature_weights
+{internal_node_label}_{output_dir}_GSS.txt
+	Gene/group significance score for each non-zero gene/feature group, calculated as the sum of absolute weights for each feature in that gene.
 
 
-## overlapping_sg_lasso_logisticr
+Grid Search Results Files
 
-	required inputs:
-	  --features_file (-f)          Matrix containing feature set A.
-	  --opts_ind_file (-n)          Matrix of indices defining overlapping group information.
-	  --field_file (-g)             Vector of feature indices for overlapping groups.
-	  --responses_file (-r)         Vector containing responses y.
-	optional inputs:
-	  --feature_weights_file (-w)   Output file to write learned feature weights to.
-	  --lambda1 (-z)                Feature regularization parameter (z1 >=0). Default value 0.
-	  --lambda2 (-y)                Group regularization parameter (z2 >=0). Default value 0.
+In addition to containing versions of each of the basic output files with "_{lambda1}_{lambda2}" appended before the file extension (e.g. {internal_node_label}_{output_dir}_gene_predictions_{lambda1}_{lambda2}.txt) for each model generated, the output directory of a grid search process will contain the following results files aggregated across all non-filtered models produced by the grid search:
 
-sample usage:
+{internal_node_label}_GCS_median.txt
+	Median of each gene's contribution scores for each species (i.e. the values under the individual gene columns in the *_gene_predictions.txt file) across all non-filtered models.
 
-	bin/overlapping_sg_lasso_logisticr -f angiosperm_input/feature_angiosperm_input.txt -z 0.1 -y 0.5 -n angiosperm_input/group_indices_angiosperm_input.txt -g angiosperm_input/field_angiosperm_input.txt -r angiosperm_input/response_angiosperm_input.txt -w angiosperm_out_feature_weights
+{internal_node_label}_GCS_median.png
+	Visual representation of *_GCS_median.txt file.
+
+{internal_node_label}_PSS_median.txt
+	Median of position significance scores across all non-filtered models.
+
+{internal_node_label}_GSS_median.txt
+	Median of gene/group significance scores across all non-filtered models.
 
 
-## Parsing raw outputs of C++ components
+Cross-Validation Results Files
 
-The weights in the output XML file are in the same order as the lines in the feature mapping file.
-Simple commands to remove the XML formatting, merge the two, and remove all features with a weight of zero:
+{internal_node_label}_{output_dir}_gene_predictions_xval.txt
+	Table of predictions produced by cross validation (i.e. the weights/predictions displayed for each sample are generated by the model where that sample was in the holdout set), including the total weight contributed by each feature group to each sample's total score.
 
-	grep -P "<item>.*</item>" angiosperm_out_feature_weights.xml | sed -re "s/.*<item>(.*)<\/item>.*/\1/" > temp_angiosperm_out_feature_weights.txt
-	paste <(sed -e "1d" angiosperm_input/feature_mapping_angiosperm_input.txt) temp_angiosperm_out_feature_weights.txt | grep -v "0.00000000000000000e+00" > angiosperm_out_feature_weights.txt
+{internal_node_label}_{output_dir}_gene_predictions_xval.png
+	Visual representation of *_gene_predictions_xval.txt file.
 
-# Building from source
 
-To install all dependencies (hopefully) for building from source:
+Intermediate/auxiliary files
 
-	sudo apt -y install g++-8 libopenblas-dev liblapack-dev
+{internal_node_label}_{output_dir}_hypothesis.txt
+	Tab-separated, two-column hypothesis/response file generated by the preprocess program from the provided newick tree.
 
-To build everything, do the following:
+feature_{internal_node_label}_{output_dir}_hypothesis.txt
+	Matrix of one-hot encoded features generated by the preprocess program from alignments and one hypothesis derived from the input tree. If --response option is used in place of deriving a hypothesis from the tree, {internal_node_label} will reflect the name of the file used for the --response option.
 
-	git clone -b dev https://github.com/kumarlabgit/ESL ESL
-	cd ESL
-	bash build_script.sh
+feature_mapping_{internal_node_label}_{output_dir}_hypothesis.txt
+	File mapping each one-hot column in the features file to a feature label specifying the alignment, position, and allele that the one-hot feature column refers to.
+
+field_{internal_node_label}_{output_dir}_hypothesis.txt
+	An intermediate index mapping file needed for overlapping inputs, generated by the preprocess program and only used by overlapping versions of the sparse group LASSO.
+
+group_indices_{internal_node_label}_{output_dir}_hypothesis.txt
+	A 3-row file providing the start coordinate, end coordinate, and weight penalty of each group in the features file. Note, for overlapping inputs, the start and end coordinates refer to ranges in the field file, which contain a set of positions/indexes into the features file. For non-overlapping inputs the start/end coordinates can be indexed directly to the features file.
+
+{internal_node_label}_{output_dir}_xval_groups.txt
+	File indicating cross-validation partition to place each sample in.
+
+missing_seqs_{output_dir}.txt
+	File indicating gene/sequence pairs for which there was no sequence data available in the provided alignments. Used to annotate gene_predictions files to differentiate between feature groups that contributed zero weight vs those that were missing from the input.
+
+{output_dir}_lambda_list.txt
+	File of lambda value pairs to generate models for, used for the grid search mode.
+

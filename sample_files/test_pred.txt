@@ -1,0 +1,8 @@
+Arabidopsis_thaliana	1
+Acorus_americanus	1
+Dioscorea_villosa	-1
+Ipomoea_purpurea	-1
+Catharanthus_roseus	-1
+Prumnopitys_andina	-1
+Brachypodium_distachyon	-1
+Sorghum_bicolor	-1
