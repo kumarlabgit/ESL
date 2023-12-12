@@ -203,6 +203,41 @@ The phylogeny testing pipeline utilizes a set of programs written in C++ to tran
 
 ### sg_lasso
 
+Sparse group LASSO using logistic regression.
+
+#### Usage:
+
+ 	bin/sg_lasso -f features_file.txt -n group_indices.txt -r response_file.txt [optional parameters]
+
+#### Required arguments:
+
+* `features_file.txt`: Matrix containing feature set where rows are samples and columns are features.
+* `group_indices.txt`: Matrix of indexes defining non-overlapping group information.
+* `response_file.txt`: Single-column response in same sample order as features file.
+
+#### Optional arguments:
+
+* `--output (-w)`: Output file basename to write learned feature weights to.
+* `--model_format (-l)`: Specify an output model format of either "xml" or "flat" (defaults to xml).
+* `--lambda1 (-z)`: Feature regularization parameter (z1 >=0). Default value 0.
+* `--lambda2 (-y)`: Group regularization parameter (z2 >=0). Default value 0.
+* `--xval (-x)`: Specify a tab-separated, two-column file of seq_id/index pairs, indicating the cross-validation partition index of each seq_id.
+* `--lambda_list (-l)`: Specify a tab-separated, two-column file of lambda1/lambda2 pairs. A model will be generated for each pair in the list.
+* `--gene_count_threshold (-c)`: Specify gene selection cutoff for grid-based model building. Only usable in conjunction with lambda_list option.
+* `--slep (-s)`: Specify a tab-separated, two-column file of key/value SLEP options.
+
+
+#### Usage Example
+	cd sample_files
+	../bin/preprocess angiosperm_20spec_pred.txt angiosperm_100_sample_alns.txt angiosperm_input ct 2
+	mv angiosperm_input ..
+	cd ..
+ 	bin/sg_lasso -f angiosperm_input/feature_angiosperm_input.txt -z 0.1 -y 0.5 -n angiosperm_input/group_indices_angiosperm_input.txt -r angiosperm_input/response_angiosperm_input.txt -w angiosperm_out_feature_weights
+
+### sg_lasso_leastr
+
+Sparse group LASSO using least squares regression.
+
 #### Usage:
 
  	bin/sg_lasso_leastr -f features_file.txt -n group_indices.txt -r response_file.txt [optional parameters]
@@ -215,15 +250,91 @@ The phylogeny testing pipeline utilizes a set of programs written in C++ to tran
 
 #### Optional arguments:
 
-* `--feature_weights_file (-w)`: Output file basename to write learned feature weights to.
+* `--output (-w)`: Output file basename to write learned feature weights to.
+* `--model_format (-l)`: Specify an output model format of either "xml" or "flat" (defaults to xml).
 * `--lambda1 (-z)`: Feature regularization parameter (z1 >=0). Default value 0.
 * `--lambda2 (-y)`: Group regularization parameter (z2 >=0). Default value 0.
+* `--xval (-x)`: Specify a tab-separated, two-column file of seq_id/index pairs, indicating the cross-validation partition index of each seq_id.
+* `--lambda_list (-l)`: Specify a tab-separated, two-column file of lambda1/lambda2 pairs. A model will be generated for each pair in the list.
+* `--gene_count_threshold (-c)`: Specify gene selection cutoff for grid-based model building. Only usable in conjunction with lambda_list option.
+* `--slep (-s)`: Specify a tab-separated, two-column file of key/value SLEP options.
+
 
 #### Usage Example
 	cd sample_files
 	../bin/preprocess angiosperm_20spec_pred.txt angiosperm_100_sample_alns.txt angiosperm_input ct 2
 	mv angiosperm_input ..
 	cd ..
- 	bin/sg_lasso -f angiosperm_input/feature_angiosperm_input.txt -z 0.1 -y 0.5 -n angiosperm_input/group_indices_angiosperm_input.txt -r angiosperm_input/response_angiosperm_input.txt -w angiosperm_out_feature_weights
+ 	bin/sg_lasso_leastr -f angiosperm_input/feature_angiosperm_input.txt -z 0.1 -y 0.5 -n angiosperm_input/group_indices_angiosperm_input.txt -r angiosperm_input/response_angiosperm_input.txt -w angiosperm_out_feature_weights
 
 
+### overlapping_sg_lasso_logisticr
+
+Overlapping sparse group LASSO using logistic regression.
+
+#### Usage:
+
+ 	bin/overlapping_sg_lasso_logisticr -f features_file.txt -n group_indices.txt -g field.txt -r response_file.txt [optional parameters]
+
+#### Required arguments:
+
+* `features_file.txt`: Matrix containing feature set where rows are samples and columns are features.
+* `group_indices.txt`: Matrix of indexes defining non-overlapping group information.
+* `field.txt`: Feature indices file for overlapping groups. Index ranges in group indices must be contiguous and non-overlapping so, for overlapping input, group_indices ranges are not direct indexes into the features file, but rather indexes into the field file, which is a list of indexes into the features file. E.g. for a feature file containing 3 features, with 2 overlapping groups each containing 2 features, your group indices would be (1-2, 3-4), and your field file would be (1,2,2,3).
+* `response_file.txt`: Single-column response in same sample order as features file.
+
+
+#### Optional arguments:
+
+* `--output (-w)`: Output file basename to write learned feature weights to.
+* `--model_format (-l)`: Specify an output model format of either "xml" or "flat" (defaults to xml).
+* `--lambda1 (-z)`: Feature regularization parameter (z1 >=0). Default value 0.
+* `--lambda2 (-y)`: Group regularization parameter (z2 >=0). Default value 0.
+* `--xval (-x)`: Specify a tab-separated, two-column file of seq_id/index pairs, indicating the cross-validation partition index of each seq_id.
+* `--lambda_list (-l)`: Specify a tab-separated, two-column file of lambda1/lambda2 pairs. A model will be generated for each pair in the list.
+* `--gene_count_threshold (-c)`: Specify gene selection cutoff for grid-based model building. Only usable in conjunction with lambda_list option.
+* `--slep (-s)`: Specify a tab-separated, two-column file of key/value SLEP options.
+
+
+#### Usage Example
+	cd sample_files
+	../bin/preprocess angiosperm_20spec_pred.txt angiosperm_100_sample_alns_overlapping.txt ol_angiosperm_input ct 2
+	mv angiosperm_input ..
+	cd ..
+ 	bin/overlapping_sg_lasso_logisticr -f ol_angiosperm_input/feature_ol_angiosperm_input.txt -z 0.1 -y 0.5 -n ol_angiosperm_input/group_indices_ol_angiosperm_input.txt -g ol_angiosperm_input/field_ol_angiosperm_input.txt -r ol_angiosperm_input/response_ol_angiosperm_input.txt -w angiosperm_out_feature_weights
+
+
+### overlapping_sg_lasso_leastr
+
+Overlapping sparse group LASSO using least squares regression.
+
+#### Usage:
+
+ 	bin/overlapping_sg_lasso_leastr -f features_file.txt -n group_indices.txt -g field.txt -r response_file.txt [optional parameters]
+
+#### Required arguments:
+
+* `features_file.txt`: Matrix containing feature set where rows are samples and columns are features.
+* `group_indices.txt`: Matrix of indexes defining non-overlapping group information.
+* `field.txt`: Feature indices file for overlapping groups. Index ranges in group indices must be contiguous and non-overlapping so, for overlapping input, group_indices ranges are not direct indexes into the features file, but rather indexes into the field file, which is a list of indexes into the features file. E.g. for a feature file containing 3 features, with 2 overlapping groups each containing 2 features, your group indices would be (1-2, 3-4), and your field file would be (1,2,2,3).
+* `response_file.txt`: Single-column response in same sample order as features file.
+
+
+#### Optional arguments:
+
+* `--output (-w)`: Output file basename to write learned feature weights to.
+* `--model_format (-l)`: Specify an output model format of either "xml" or "flat" (defaults to xml).
+* `--lambda1 (-z)`: Feature regularization parameter (z1 >=0). Default value 0.
+* `--lambda2 (-y)`: Group regularization parameter (z2 >=0). Default value 0.
+* `--xval (-x)`: Specify a tab-separated, two-column file of seq_id/index pairs, indicating the cross-validation partition index of each seq_id.
+* `--lambda_list (-l)`: Specify a tab-separated, two-column file of lambda1/lambda2 pairs. A model will be generated for each pair in the list.
+* `--gene_count_threshold (-c)`: Specify gene selection cutoff for grid-based model building. Only usable in conjunction with lambda_list option.
+* `--slep (-s)`: Specify a tab-separated, two-column file of key/value SLEP options.
+
+
+#### Usage Example
+	cd sample_files
+	../bin/preprocess angiosperm_20spec_pred.txt angiosperm_100_sample_alns_overlapping.txt ol_angiosperm_input ct 2
+	mv angiosperm_input ..
+	cd ..
+ 	bin/overlapping_sg_lasso_leastr -f ol_angiosperm_input/feature_ol_angiosperm_input.txt -z 0.1 -y 0.5 -n ol_angiosperm_input/group_indices_ol_angiosperm_input.txt -g ol_angiosperm_input/field_ol_angiosperm_input.txt -r ol_angiosperm_input/response_ol_angiosperm_input.txt -w angiosperm_out_feature_weights
